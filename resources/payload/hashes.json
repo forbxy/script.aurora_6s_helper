@@ -1,5 +1,12 @@
 {
   "99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
   "dtb.img": "b549e3f325683b51342d9769ef53d0084fc3ffc33865f29874685e25635d38ef",
+  "ng/8852be.ko": "34e910261c5fd5a2ecbb30e07376702057421b9d60e7de5f1cb8e8b6c5b625a0",
+  "ng/aurora6s-ng-led.service": "31c9bc4752ba8b5d5fb242aacabfc89917d5e1e63950c6a3895bed745891c017",
+  "ng/aurora6s-ng-wifi.service": "9016c0e8a8945133f41d9e8cb4c8d7934066103eae1d2d8110141f515154f6c9",
+  "ng/dtb.img": "af666e3c30aaaf7efb1c410baf3b2d4ec62768ad9a1694c2bb2bed7204c6e33e",
+  "ng/leds-tca6507.ko": "b2314db63da57c20fb3f65cd3bd8c30b6031e3f3d99af3f3c7157692bdc901c1",
+  "ng/load-drivers.sh": "27a525f6bd2f5b7e5657d935e850d4e00f93ee50b1147c0d5a115953d17d697c",
+  "ng/rtkm.ko": "65bc6cf8916ad3d3b9c6becef351c4730bd7ed6c56a3f2424bee60b7d9dac141",
   "rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2"
 }

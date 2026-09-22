@@ -15,23 +15,14 @@ DT_ID = 'sc2_s905x4_tencent_aurora_6s'
 
 
 def check_platform(led=False):
-    release = Path('/etc/os-release').read_text(encoding='utf-8')
-    data = dict(line.split('=', 1) for line in release.splitlines() if '=' in line)
-    if data.get('ID', '').strip('"') != 'coreelec' or data.get('DISTRO_DEVICE', '').strip('"') != 'Amlogic-no':
-        raise RuntimeError('仅支持极光 6S 的 CoreELEC Amlogic-no 系统')
-    if data.get('VERSION_ID', '').strip('"').split('.')[0] != '22':
-        raise RuntimeError('此修复包针对 CoreELEC 22；其他版本尚未验证')
-    compatible = Path('/proc/device-tree/compatible').read_bytes().replace(b' ', b'').split(b'\0')
-    if b'amlogic,sc2' not in compatible:
-        raise RuntimeError('平台不匹配：此插件仅支持极光 6S 的 SC2 硬件')
-    if os.geteuid() != 0:
-        raise RuntimeError('需要 CoreELEC 的 root 权限')
+    from device import detect, DT_IDS
+    profile = detect(check_kernel=not led)
     if led:
-        ident = Path('/proc/device-tree/coreelec-dt-id').read_bytes().rstrip(b'\0').decode()
-        if ident != DT_ID:
+        if profile['dt_id'] != DT_IDS[profile['branch']]:
             raise RuntimeError('请先安装本插件的极光 6S 硬件修复并重启')
         if not DEVICE.exists():
             raise RuntimeError('未找到灯控芯片，请重启后重试')
+    return profile
 
 
 def write(path, value):
@@ -53,7 +44,7 @@ class Controller:
     def acquire(self):
         if self.fd is not None:
             return
-        check_platform(led=True)
+        profile = check_platform(led=True)
         self.lock = open('/run/aurora6s-led.lock', 'a')
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -78,6 +69,8 @@ class Controller:
             if bound.exists():
                 write(DRIVER / 'unbind', DEVICE.name)
             if not Path('/dev/i2c-3').exists():
+                if profile['branch'] == 'ng':
+                    raise RuntimeError('I2C 接口未就绪，请检查 aurora6s-ng-led.service')
                 subprocess.run(['modprobe', 'i2c-dev'], check=True, timeout=10)
             self.fd = os.open('/dev/i2c-3', os.O_RDWR)
             fcntl.ioctl(self.fd, 0x0703, 0x45)  # no I2C_SLAVE_FORCE

@@ -46,14 +46,15 @@ def encode(values, breathing=False, fade_ms=1536):
         code = min(range(1, 16), key=lambda i: abs(TIMES[i] - fade_ms))
         registers[3] = registers[5] = code * 17
         registers[4] = 0x22  # 128 ms at peak
-        registers[6] = registers[7] = 0x44  # 256 ms off
+        off_code = min(range(16), key=lambda i: abs(TIMES[i] - fade_ms / 4))
+        registers[6] = registers[7] = off_code * 17  # fast/medium/slow: 192/384/768 ms
         registers[10] = 0x88  # both banks start at fade-on
     return bytes(registers)
 
 
 def software_frame(values, elapsed, fade_ms):
     fade = fade_ms / 1000.0
-    t = elapsed % (2 * fade + .128 + .256)
+    t = elapsed % (2 * fade + .128 + fade / 4)
     if t < fade:
         factor = (1 - math.cos(math.pi * t / fade)) / 2
     elif t < fade + .128:

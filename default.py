@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 import xbmc
 import xbmcaddon
@@ -20,7 +21,7 @@ def main():
     addon = xbmcaddon.Addon(ADDON_ID)
     choice = sys.argv[1] if len(sys.argv) > 1 else ''
     if not choice:
-        selected = dialog.select('极光 6S 助手', ['修复 Wi-Fi / 蓝牙 / V12 遥控器', '设置灯条（常规 / 播放）'])
+        selected = dialog.select('极光 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）'])
         if selected < 0:
             return
         choice = ('repair', 'lights')[selected]
@@ -69,14 +70,26 @@ def main():
         return
     if choice != 'repair':
         return
-    result = repair.check()
-    if not dialog.yesno('极光 6S 硬件修复', result + '\n\n仅用于腾讯极光 6S（A4112）。将备份并更新 DTB、蓝牙配置及 V12 规则，完成后需要重启。确认此盒子为 6S 并安装？',
-                        nolabel='取消', yeslabel='备份并安装'):
+    profile = repair.check(allow_unidentified=True)
+    branch = profile['branch'].upper()
+    result = 'CoreELEC %s / %s\n' % (profile['version'], branch)
+    if profile['confirmation_required']:
+        result += '当前设备树型号：%s\n设备树标识：%s\n' % (profile['model'] or '未知', profile['dt_id'] or '未知')
+        result += '无法自动确认机型。如果只是借用了 X4 等设备树，请按盒子实际型号确认；真正的其他型号请取消。\n'
+    result += ('将安装 NG DTB、蓝牙配置及独立 systemd 驱动服务。' if branch == 'NG'
+               else '将安装 NO DTB、蓝牙配置及 V12 识别规则。')
+    if not dialog.yesno('极光 6S 硬件修复', result + '\n\n仅用于腾讯极光 6S（A4112）。安装前会备份，完成后需要重启。确认此盒子为 6S 并安装？',
+                        nolabel='取消', yeslabel='确认是6S并安装' if profile['confirmation_required'] else '备份并安装'):
         return
     progress = xbmcgui.DialogProgressBG()
     progress.create('极光 6S 硬件修复', '正在备份并部署…')
     try:
-        backup = repair.install()
+        script = Path(__file__).parent / 'resources/scripts/install-repair.sh'
+        proc = subprocess.run(['/bin/sh', str(script), '--install', '--confirm-6s'],
+                              capture_output=True, text=True, timeout=180)
+        if proc.returncode:
+            raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or '安装失败')
+        backup = json.loads(proc.stdout)['backup']
     finally:
         progress.close()
     if dialog.yesno('修复已安装', '已核对文件。重启后加载新配置。\n备份：' + backup,
