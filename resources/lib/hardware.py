@@ -11,15 +11,14 @@ DRIVER = Path('/sys/bus/i2c/drivers/leds-tca6507')
 DEVICE = Path('/sys/bus/i2c/devices/3-0045')
 STATE = Path('/run/aurora6s-led-original.json')
 CHANNELS = ('strip-red', 'strip-green', 'strip-blue')
-DT_ID = 'sc2_s905x4_tencent_aurora_6s'
 
 
 def check_platform(led=False):
-    from device import detect, DT_IDS
+    from device import detect
     profile = detect(check_kernel=not led)
     if led:
-        if profile['dt_id'] != DT_IDS[profile['branch']]:
-            raise RuntimeError('请先安装本插件的极光 6S 硬件修复并重启')
+        if profile['dt_id'] != profile['expected_dt_id']:
+            raise RuntimeError('请先安装对应机型的硬件修复并重启')
         if not DEVICE.exists():
             raise RuntimeError('未找到灯控芯片，请重启后重试')
     return profile

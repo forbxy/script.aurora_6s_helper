@@ -21,7 +21,7 @@ def main():
     addon = xbmcaddon.Addon(ADDON_ID)
     choice = sys.argv[1] if len(sys.argv) > 1 else ''
     if not choice:
-        selected = dialog.select('极光 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）'])
+        selected = dialog.select('极光 4 Pro / 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）'])
         if selected < 0:
             return
         choice = ('repair', 'lights')[selected]
@@ -43,7 +43,7 @@ def main():
         rgb = parse_color(value.strip())
         addon.setSetting(key, 'FF' + ''.join('%02X' % c for c in rgb))
         notify_service()
-        dialog.notification('极光 6S 灯条', '颜色已保存，并按当前播放状态应用')
+        dialog.notification('极光灯条', '颜色已保存，并按当前播放状态应用')
         return
     if choice == 'lights':
         addon.openSettings()
@@ -51,7 +51,7 @@ def main():
         return
     if choice == 'apply':
         notify_service()
-        dialog.notification('极光 6S 灯条', '已请求按当前播放状态应用保存的设置')
+        dialog.notification('极光灯条', '已请求按当前播放状态应用保存的设置')
         return
     if choice == 'status':
         p = Path('/run/aurora6s-led-status.json')
@@ -71,21 +71,32 @@ def main():
     if choice != 'repair':
         return
     profile = repair.check(allow_unidentified=True)
+    if not profile['board']:
+        selected = dialog.select('按盒子实物确认机型', ['极光 6S（A4112）', '极光 4 Pro（A4111）'])
+        if selected < 0:
+            return
+        profile = repair.check(confirmed_board=('6s', '4pro')[selected])
     branch = profile['branch'].upper()
-    result = 'CoreELEC %s / %s\n' % (profile['version'], branch)
+    board_name = '极光 4 Pro（A4111）' if profile['board'] == '4pro' else '极光 6S（A4112）'
+    chip_name = 'AP6275P / BCM43752' if profile['chip'] == 'ap6275p' else 'RTL8852'
+    result = 'CoreELEC %s / %s\n%s / %s\n' % (profile['version'], branch, board_name, chip_name)
+    if profile['soc_revision']:
+        result += 'S905X4 rev %s\n' % profile['soc_revision']
     if profile['confirmation_required']:
         result += '当前设备树型号：%s\n设备树标识：%s\n' % (profile['model'] or '未知', profile['dt_id'] or '未知')
         result += '无法自动确认机型。如果只是借用了 X4 等设备树，请按盒子实际型号确认；真正的其他型号请取消。\n'
-    result += ('将安装 NG DTB、蓝牙配置及独立 systemd 驱动服务。' if branch == 'NG'
+    result += ('将安装 NG DTB 和灯条驱动服务，使用 CE 自带的博通 Wi-Fi/蓝牙支持；备份并清理旧 Realtek NG 修复文件及启动项。' if profile['chip'] == 'ap6275p' and branch == 'NG'
+               else '将安装 NO DTB 及 V12 识别规则，使用 CE 自带的博通 Wi-Fi/蓝牙驱动和固件。' if profile['chip'] == 'ap6275p'
+               else '将安装 NG DTB、蓝牙配置及独立 systemd 驱动服务。' if branch == 'NG'
                else '将安装 NO DTB、蓝牙配置及 V12 识别规则。')
-    if not dialog.yesno('极光 6S 硬件修复', result + '\n\n仅用于腾讯极光 6S（A4112）。安装前会备份，完成后需要重启。确认此盒子为 6S 并安装？',
-                        nolabel='取消', yeslabel='确认是6S并安装' if profile['confirmation_required'] else '备份并安装'):
+    if not dialog.yesno('极光硬件修复', result + '\n\n安装前会备份，完成后需要重启。确认机型并安装？',
+                        nolabel='取消', yeslabel='备份并安装'):
         return
     progress = xbmcgui.DialogProgressBG()
-    progress.create('极光 6S 硬件修复', '正在备份并部署…')
+    progress.create('极光硬件修复', '正在备份并部署…')
     try:
         script = Path(__file__).parent / 'resources/scripts/install-repair.sh'
-        proc = subprocess.run(['/bin/sh', str(script), '--install', '--confirm-6s'],
+        proc = subprocess.run(['/bin/sh', str(script), '--install', '--confirm-board', profile['board']],
                               capture_output=True, text=True, timeout=180)
         if proc.returncode:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or '安装失败')
@@ -102,4 +113,4 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         xbmc.log('[Aurora6S] ' + str(exc), xbmc.LOGERROR)
-        xbmcgui.Dialog().ok('极光 6S 助手', str(exc))
+        xbmcgui.Dialog().ok('极光 4 Pro / 6S 助手', str(exc))

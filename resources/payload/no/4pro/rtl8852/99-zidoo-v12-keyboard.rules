@@ -1,0 +1,5 @@
+# Remote-V12 advertises tablet capabilities on its keyboard interface.
+# Keep keyboard classification so libinput delivers keys to Kodi.
+# libinput combines tags from the event node and its input parent.
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="input*", ATTR{name}=="Remote-V12 Keyboard", ATTR{id/bustype}=="0005", ATTR{id/vendor}=="5a44", ATTR{id/product}=="5a44", ENV{ID_INPUT_TABLET}="", ENV{ID_INPUT_TABLET_PAD}="", ENV{ID_INPUT_KEY}="1", ENV{ID_INPUT_KEYBOARD}="1"
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Remote-V12 Keyboard", ATTRS{id/bustype}=="0005", ATTRS{id/vendor}=="5a44", ATTRS{id/product}=="5a44", ENV{ID_INPUT_TABLET}="", ENV{ID_INPUT_TABLET_PAD}="", ENV{ID_INPUT_KEY}="1", ENV{ID_INPUT_KEYBOARD}="1"
