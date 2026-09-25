@@ -21,16 +21,20 @@ def main():
     addon = xbmcaddon.Addon(ADDON_ID)
     choice = sys.argv[1] if len(sys.argv) > 1 else ''
     if not choice:
-        selected = dialog.select('极光 4 Pro / 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）'])
+        selected = dialog.select('极光 4 Pro / 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）', 'eMMC 双系统与备份'])
         if selected < 0:
             return
-        choice = ('repair', 'lights')[selected]
+        choice = ('repair', 'lights', 'emmc')[selected]
         if choice == 'lights':
             action = dialog.select('灯条设置', ['色盘选色与灯光效果', '精确输入颜色值'])
             if action < 0:
                 return
             if action == 1:
                 choice = 'custom-color'
+    if choice == 'emmc':
+        import emmc_ui
+        emmc_ui.main()
+        return
     if choice == 'custom-color':
         scene = dialog.select('精确输入颜色', ['常规状态', '播放状态'])
         if scene < 0:
@@ -72,17 +76,26 @@ def main():
         return
     profile = repair.check(allow_unidentified=True)
     if not profile['board']:
-        selected = dialog.select('按盒子实物确认机型', ['极光 6S（A4112）', '极光 4 Pro（A4111）'])
+        if profile.get('identity_error'):
+            dialog.ok('无法自动识别实物机型', profile['identity_error'] + '\n当前 DTB 名称不能证明实物机型，请按盒子标签确认。')
+        if profile.get('model_choice_required'):
+            selected = dialog.select('A4111 / rev D：请选择实物机型', ['极光 4 Pro', '极光 6S'])
+            choices = ('4pro', '6s')
+        else:
+            selected = dialog.select('按盒子实物确认机型', ['极光 6S（A4112）', '极光 4 Pro（A4111）'])
+            choices = ('6s', '4pro')
         if selected < 0:
             return
-        profile = repair.check(confirmed_board=('6s', '4pro')[selected])
+        profile = repair.check(confirmed_board=choices[selected])
     branch = profile['branch'].upper()
     board_name = '极光 4 Pro（A4111）' if profile['board'] == '4pro' else '极光 6S（A4112）'
     chip_name = 'AP6275P / BCM43752' if profile['chip'] == 'ap6275p' else 'RTL8852'
     result = 'CoreELEC %s / %s\n%s / %s\n' % (profile['version'], branch, board_name, chip_name)
     if profile['soc_revision']:
         result += 'S905X4 rev %s\n' % profile['soc_revision']
-    if profile['confirmation_required']:
+    if profile.get('model_choice_required'):
+        result += 'Android 属性为 A4111 / rev D，修复包按你选择的实物机型安装。\n'
+    elif profile['confirmation_required']:
         result += '当前设备树型号：%s\n设备树标识：%s\n' % (profile['model'] or '未知', profile['dt_id'] or '未知')
         result += '无法自动确认机型。如果只是借用了 X4 等设备树，请按盒子实际型号确认；真正的其他型号请取消。\n'
     result += ('将安装 NG DTB 和灯条驱动服务，使用 CE 自带的博通 Wi-Fi/蓝牙支持；备份并清理旧 Realtek NG 修复文件及启动项。' if profile['chip'] == 'ap6275p' and branch == 'NG'
@@ -113,4 +126,4 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         xbmc.log('[Aurora6S] ' + str(exc), xbmc.LOGERROR)
-        xbmcgui.Dialog().ok('极光 4 Pro / 6S 助手', str(exc))
+        xbmcgui.Dialog().ok('极光6S/4Pro助手', str(exc))

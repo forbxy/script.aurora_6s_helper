@@ -1,6 +1,9 @@
 """Identify the supported board/build without relying on Kodi."""
 import os
 import gzip
+import json
+import subprocess
+import sys
 from pathlib import Path
 import platform
 import re
@@ -41,19 +44,44 @@ def payload_key(branch, board='6s', chip='rtl8852'):
     return key
 
 
+class AndroidIdentityUnavailable(RuntimeError):
+    pass
+
+
 def android_board():
-    boards = set()
+    models = set()
     for path in ANDROID_PROPERTIES:
         if not path.is_file():
             continue
         for line in path.read_text(errors='replace').splitlines():
             key, sep, value = line.partition('=')
-            if sep and key.strip() in ('ro.product.vendor.model', 'ro.product.system.model', 'ro.product.model'):
-                if value.strip() in BOARD_MODELS:
-                    boards.add(BOARD_MODELS[value.strip()])
-    if len(boards) > 1:
-        raise RuntimeError('Android 机型信息冲突')
-    return next(iter(boards), '')
+            if sep and re.fullmatch(r'ro\.product\.(?:[\w]+\.)?model', key.strip()):
+                if value.strip():
+                    models.add(value.strip())
+    if not models:
+        helper = Path(__file__).resolve().parents[1] / 'emmc/read_hardware_model.py'
+        try:
+            result = subprocess.run([sys.executable, str(helper)], capture_output=True,
+                                    text=True, timeout=150)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise AndroidIdentityUnavailable('原厂机型读取失败：' + str(exc)) from exc
+        if result.returncode:
+            raise AndroidIdentityUnavailable('原厂机型读取失败：' + result.stderr.strip())
+        try:
+            values = json.loads(result.stdout)
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                raise ValueError('invalid model list')
+            models = {v.strip() for v in values if v.strip()}
+        except (ValueError, TypeError) as exc:
+            raise AndroidIdentityUnavailable('原厂机型读取结果无效') from exc
+    if not models:
+        raise AndroidIdentityUnavailable('未找到原厂 Android 机型')
+    if len(models) != 1:
+        raise RuntimeError('Android 机型信息冲突：' + ', '.join(sorted(models)))
+    model = next(iter(models))
+    if model not in BOARD_MODELS:
+        raise RuntimeError('不支持的原厂 Android 机型：' + model)
+    return BOARD_MODELS[model]
 
 
 def soc_revision():
@@ -101,7 +129,7 @@ def check_ng_kernel():
         raise RuntimeError('NG 内核模块配置不匹配，需要 ARM64/SMP/PREEMPT/MODULE_UNLOAD/MODVERSIONS')
 
 
-def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, confirmed_board=None):
+def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, confirmed_board=None, runtime_profile=False):
     data = {}
     for line in RELEASE.read_text(encoding='utf-8').splitlines():
         if line and not line.startswith('#') and '=' in line:
@@ -129,43 +157,45 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
         raise RuntimeError('硬件平台不匹配：需要极光 4 Pro / 6S 的 SC2 平台')
     ident = text_property('coreelec-dt-id')
     model = text_property('model')
-    board = android_board()
+    identity_error = ''
+    try:
+        board = android_board()
+    except AndroidIdentityUnavailable as exc:
+        board, identity_error = '', str(exc)
     source = 'android' if board else ''
+    revision, actual_chip = soc_revision(), pci_chip()
+    model_choice_required = board == '4pro' and revision == 'D'
+    if model_choice_required and actual_chip and actual_chip != 'rtl8852':
+        raise RuntimeError('PCI 无线芯片与 A4111 rev D 不匹配，拒绝选择修复包')
     confirmed = confirmed_board or ('6s' if confirmed_6s else None)
     if confirmed_6s and confirmed_board not in (None, '6s'):
         raise RuntimeError('手动确认的机型冲突')
     if confirmed and confirmed not in ('6s', '4pro'):
         raise RuntimeError('未知确认机型')
-    if board and confirmed and board != confirmed:
+    if board and confirmed and board != confirmed and not model_choice_required:
         raise RuntimeError('手动确认与 Android 机型不匹配')
     known = bool(board)
+    if model_choice_required:
+        board, source, known = '', '', False
+        # Only runtime LED control may reuse the selected, installed DTB.
+        # Every repair entry still requires an explicit physical-model choice.
+        if runtime_profile and not confirmed:
+            for candidate in ('6s', '4pro'):
+                if ident == PROFILE_IDS[payload_key(branch, candidate, 'rtl8852')]:
+                    board, source, known = candidate, 'installed_dtb', True
+                    break
     if not board and confirmed:
         board, source = confirmed, 'manual'
-    if not board:
-        for key, dtid in PROFILE_IDS.items():
-            if ident == dtid:
-                board, source, known = key.split('/')[1], 'dtb', True
-                break
-    if not board and model in (
-        'Tencent Aurora Box 6S', 'Tencent Aurora Box 6S (CoreELEC NG)',
-        'Tencent Aurora Box 6S (A4112)'):
-        board, source, known = '6s', 'dtb', True
     if not board and not allow_unidentified:
         raise RuntimeError('需先明确确认实物为极光 4 Pro（A4111）或 6S（A4112）')
-    revision, actual_chip = soc_revision(), pci_chip()
-    # A borrowed 6S DTB is not proof of the physical board. Let the repair UI
-    # ask for the model when PCI evidence contradicts that DTB, never Android.
-    if (allow_unidentified and source == 'dtb' and board == '6s'
-            and actual_chip == 'ap6275p'):
-        board, source, known = '', '', False
     chip, chip_source = '', ''
     if board:
         expected = ('rtl8852' if board == '6s' or revision == 'D'
                     else 'ap6275p' if revision in ('A', 'B', 'C') else '')
         if actual_chip and expected and actual_chip != expected:
             raise RuntimeError('PCI 无线芯片与机型/CPU 修订号不匹配，拒绝选择修复包')
-        chip = actual_chip or expected
-        chip_source = 'pci' if actual_chip else ('board' if board == '6s' else 'soc_revision')
+        chip = expected or actual_chip
+        chip_source = ('board' if board == '6s' else 'soc_revision') if expected else 'pci'
         if not chip:
             raise RuntimeError('无法确定 4 Pro 无线版本：需要 PCI ID 或 S905X4 rev A/B/C/D')
         key = payload_key(branch, board, chip)
@@ -176,4 +206,5 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
     return dict(branch=branch, version=version, model=model, dt_id=ident,
                 board=board, chip=chip, soc_revision=revision, payload=key,
                 expected_dt_id=PROFILE_IDS.get(key, ''), board_source=source,
-                chip_source=chip_source, board_verified=known, confirmation_required=not known)
+                chip_source=chip_source, board_verified=known, confirmation_required=not known,
+                identity_error=identity_error, model_choice_required=model_choice_required)

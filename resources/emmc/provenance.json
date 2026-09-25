@@ -1,0 +1,9 @@
+{
+  "backend": "adapted from local CE_android/tools",
+  "ampart_repository": "https://github.com/7Ji/ampart",
+  "ampart_commit": "1539ff2f6fa73ef78dfde3ac585fb9c93244e85e",
+  "ampart_binary_sha256": "a23a8b2c955a0acd300458e5f26938210bf48b01b5cad920953b324929853047",
+  "ampart_binary_source": "CE_android/research/ce-native-simulation/ampart-aarch64-static",
+  "ampart_use": "only regular-file simulation, never a /dev path",
+  "am9_review_commit": "581ca4f7a441461b957d814cc9beb1a1cca6cfe5"
+}

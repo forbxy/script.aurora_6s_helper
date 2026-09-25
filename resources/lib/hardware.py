@@ -15,7 +15,7 @@ CHANNELS = ('strip-red', 'strip-green', 'strip-blue')
 
 def check_platform(led=False):
     from device import detect
-    profile = detect(check_kernel=not led)
+    profile = detect(check_kernel=not led, runtime_profile=led)
     if led:
         if profile['dt_id'] != profile['expected_dt_id']:
             raise RuntimeError('请先安装对应机型的硬件修复并重启')
