@@ -16,6 +16,7 @@ import uuid
 import sys
 
 from aurora_emmc import probe, read, mountinfo, disk_parent, MIB
+from block_device import BLKGETSIZE64
 from backup_emmc import acquire, depends_on_emmc, assert_no_rw_emmc_mount
 from check_backup import inspect, safe_file
 from layout_trial import atomic_json, read_regions, write_regions, private_external
@@ -29,8 +30,6 @@ BASE = Path('/storage/aurora-emmc-jobs')
 BACKUPS = Path('/storage/aurora-emmc-backups')
 ENV_KEYS = ('bootcmd','cfgloademmc','bootfromemmc','storeboot','bootfromnand','active_slot')
 DISK = '/dev/mmcblk0'
-# Linux encodes sizeof(size_t) in this ioctl, including 32-bit NG userspace.
-BLKGETSIZE64 = 0x80001272 | (struct.calcsize('P') << 16)
 
 
 def run(args, timeout=120):

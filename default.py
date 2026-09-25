@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -10,6 +11,7 @@ import xbmcgui
 sys.path.insert(0, str(Path(__file__).parent / 'resources/lib'))
 from config import ADDON_ID, parse_color
 import repair
+from diagnostics import exception_details
 
 
 def notify_service():
@@ -110,7 +112,8 @@ def main():
     try:
         script = Path(__file__).parent / 'resources/scripts/install-repair.sh'
         proc = subprocess.run(['/bin/sh', str(script), '--install', '--confirm-board', profile['board']],
-                              capture_output=True, text=True, timeout=180)
+                              capture_output=True, encoding='utf-8', timeout=180,
+                              env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
         if proc.returncode:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or '安装失败')
         backup = json.loads(proc.stdout)['backup']
@@ -125,5 +128,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
-        xbmc.log('[Aurora6S] ' + str(exc), xbmc.LOGERROR)
+        xbmc.log(exception_details('UI'), xbmc.LOGERROR)
         xbmcgui.Dialog().ok('极光6S/4Pro助手', str(exc))

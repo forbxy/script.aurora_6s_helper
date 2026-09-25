@@ -11,6 +11,9 @@ import struct
 import sys
 import time
 import uuid
+import traceback
+
+from block_device import BLKGETSIZE64
 
 from aurora_emmc import probe, plan, read, disk_parent
 
@@ -54,7 +57,10 @@ def acquire(device, destination, expected, progress=None):
     if progress:progress('copy',0,expected)
     with open(device,'rb',buffering=0) as source:
         if not stat.S_ISBLK(os.fstat(source.fileno()).st_mode):raise RuntimeError('Not a block device')
-        size=struct.unpack('Q',fcntl.ioctl(source,0x80081272,b'\0'*8))[0]
+        try:
+            size=struct.unpack('Q',fcntl.ioctl(source,BLKGETSIZE64,b'\0'*8))[0]
+        except OSError as exc:
+            raise OSError(exc.errno, '查询设备容量失败（ioctl=%#x）：%s' % (BLKGETSIZE64, exc.strerror), str(device)) from exc
         if size!=expected:raise RuntimeError('Device size changed')
         with partial.open('xb',buffering=0) as output:
             while total<expected:
@@ -121,4 +127,5 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as e:
+        traceback.print_exc()
         print(json.dumps(dict(phase='failed',error=str(e))),flush=True);sys.exit(1)

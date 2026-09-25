@@ -15,6 +15,7 @@ import tempfile
 
 from aurora_emmc import probe, plan, parse_mpt, read, props, mountinfo, disk_parent, command, MIB
 from backup_emmc import assert_no_rw_emmc_mount
+from block_device import BLKGETSIZE64
 from check_backup import inspect, safe_file
 from extract_recovery_metadata import validate_dtb_slots
 from prepare_boot_environment import BOOTCMD
@@ -281,7 +282,7 @@ def change(folder,token,rollback=False):
     fd=os.open('/dev/mmcblk0',os.O_RDWR|os.O_CLOEXEC)
     try:
         if not stat.S_ISBLK(os.fstat(fd).st_mode):raise ValueError('Not an eMMC block device')
-        if struct.unpack('Q',fcntl.ioctl(fd,0x80081272,b'\0'*8))[0]!=ticket['emmc_bytes']:raise ValueError('Device capacity changed')
+        if struct.unpack('Q',fcntl.ioctl(fd,BLKGETSIZE64,b'\0'*8))[0]!=ticket['emmc_bytes']:raise ValueError('Device capacity changed')
         current=read_regions(fd)
         if rollback:
             if not all(owned_bytes(current[k],old[k],new[k]) for k in old):raise ValueError('Unknown metadata changes; manual recovery review required')

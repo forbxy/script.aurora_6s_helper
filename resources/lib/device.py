@@ -53,7 +53,7 @@ def android_board():
     for path in ANDROID_PROPERTIES:
         if not path.is_file():
             continue
-        for line in path.read_text(errors='replace').splitlines():
+        for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
             key, sep, value = line.partition('=')
             if sep and re.fullmatch(r'ro\.product\.(?:[\w]+\.)?model', key.strip()):
                 if value.strip():
@@ -62,7 +62,8 @@ def android_board():
         helper = Path(__file__).resolve().parents[1] / 'emmc/read_hardware_model.py'
         try:
             result = subprocess.run([sys.executable, str(helper)], capture_output=True,
-                                    text=True, timeout=150)
+                                    encoding='utf-8', timeout=150,
+                                    env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise AndroidIdentityUnavailable('原厂机型读取失败：' + str(exc)) from exc
         if result.returncode:
@@ -89,7 +90,7 @@ def soc_revision():
         return ''
     # The Serial field carries the SMC chip ID, not the per-core ARM revision.
     match = re.search(r'^Serial\s*:\s*([0-9a-fA-F]{32})\s*$',
-                      CPUINFO.read_text(errors='replace'), re.MULTILINE)
+                      CPUINFO.read_text(encoding='utf-8', errors='replace'), re.MULTILINE)
     if not match:
         return ''
     chipid = bytes.fromhex(match.group(1))
@@ -102,7 +103,7 @@ def pci_chip():
     chips = set()
     for path in PCI.glob('*'):
         try:
-            ident = (int((path/'vendor').read_text(), 16), int((path/'device').read_text(), 16))
+            ident = (int((path/'vendor').read_text(encoding='utf-8'), 16), int((path/'device').read_text(encoding='utf-8'), 16))
         except (OSError, ValueError):
             continue
         chip = {(0x14e4, 0x449d): 'ap6275p', (0x10ec, 0xb852): 'rtl8852'}.get(ident)
@@ -123,7 +124,7 @@ def check_ng_kernel():
     if platform.release() != NG_RELEASE:
         raise RuntimeError('NG 驱动要求 4.9.269 / aarch64 内核')
     # NG has 32-bit userspace: Python uname may report armv7l on an ARM64 kernel.
-    with gzip.open(KERNEL_CONFIG, 'rt') as source:
+    with gzip.open(KERNEL_CONFIG, 'rt', encoding='utf-8') as source:
         config = set(source.read().splitlines())
     if not set(NG_FLAGS).issubset(config):
         raise RuntimeError('NG 内核模块配置不匹配，需要 ARM64/SMP/PREEMPT/MODULE_UNLOAD/MODVERSIONS')
@@ -157,6 +158,21 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
         raise RuntimeError('硬件平台不匹配：需要极光 4 Pro / 6S 的 SC2 平台')
     ident = text_property('coreelec-dt-id')
     model = text_property('model')
+    if runtime_profile:
+        # LED control consumes an already-installed board DTB. It neither selects
+        # nor installs a repair payload and must not depend on Android mounts.
+        for key, dtid in PROFILE_IDS.items():
+            if key.startswith(branch + '/') and ident == dtid:
+                parts = key.split('/')
+                board = parts[1]
+                chip = parts[2] if len(parts) == 3 else 'rtl8852'
+                return dict(branch=branch, version=version, model=model, dt_id=ident,
+                            board=board, chip=chip, soc_revision='', payload=key,
+                            expected_dt_id=dtid, board_source='installed_dtb',
+                            chip_source='installed_dtb', board_verified=False,
+                            confirmation_required=False, identity_error='',
+                            model_choice_required=False)
+        raise RuntimeError('请先安装对应机型的硬件修复并重启：当前 DTB 未提供已知灯控配置')
     identity_error = ''
     try:
         board = android_board()
@@ -177,17 +193,13 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
     known = bool(board)
     if model_choice_required:
         board, source, known = '', '', False
-        # Only runtime LED control may reuse the selected, installed DTB.
-        # Every repair entry still requires an explicit physical-model choice.
-        if runtime_profile and not confirmed:
-            for candidate in ('6s', '4pro'):
-                if ident == PROFILE_IDS[payload_key(branch, candidate, 'rtl8852')]:
-                    board, source, known = candidate, 'installed_dtb', True
-                    break
     if not board and confirmed:
         board, source = confirmed, 'manual'
     if not board and not allow_unidentified:
-        raise RuntimeError('需先明确确认实物为极光 4 Pro（A4111）或 6S（A4112）')
+        message = '需先明确确认实物为极光 4 Pro（A4111）或 6S（A4112）'
+        if identity_error:
+            message += '\n' + identity_error
+        raise RuntimeError(message)
     chip, chip_source = '', ''
     if board:
         expected = ('rtl8852' if board == '6s' or revision == 'D'

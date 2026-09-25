@@ -116,3 +116,34 @@ class DeviceIdentityTests(unittest.TestCase):
                 result = self.detect(board='4pro', revision='D', runtime_profile=True)
                 self.assertEqual(result['board'], selected)
                 self.assertEqual(result['board_source'], 'installed_dtb')
+
+    def test_lighting_does_not_read_android_or_pci(self):
+        # A4111 AP6275P NG user log: Android unavailable, LEDs already working.
+        with patch.object(device, 'android_board', side_effect=AssertionError('must not map Android')):
+            # Use this test's real profile fixture without its android_board patch.
+            with tempfile.TemporaryDirectory() as tmp:
+                release = Path(tmp)/'os-release'
+                release.write_text('ID=coreelec\nCOREELEC_DEVICE=Amlogic-ng\nVERSION_ID=21.3\n')
+                with patch.object(device, 'RELEASE', release), patch.object(device.os, 'geteuid', return_value=0), \
+                     patch.object(device, 'pci_chip', side_effect=AssertionError('no PCI required for LED')), \
+                     patch.object(device, 'text_property', side_effect=lambda name: {
+                         'compatible':'amlogic,sc2', 'model':'borrowed descriptive model',
+                         'coreelec-dt-id':device.PROFILE_IDS['ng/4pro/ap6275p']}[name]):
+                    result = device.detect(check_kernel=False, runtime_profile=True)
+                    self.assertEqual(result['payload'], 'ng/4pro/ap6275p')
+                    self.assertFalse(result['board_verified'])
+                    self.assertEqual(result['board_source'], 'installed_dtb')
+                    with self.assertRaises(AssertionError):device.detect(check_kernel=False, allow_unidentified=True)
+
+    def test_lighting_rejects_generic_or_other_branch_dtb(self):
+        for dtid in ('sc2_s905x4_4g_1gbit', device.PROFILE_IDS['ng/6s']):
+            with tempfile.TemporaryDirectory() as tmp:
+                release = Path(tmp)/'os-release'
+                release.write_text('ID=coreelec\nCOREELEC_DEVICE=Amlogic-no\nVERSION_ID=22.0\n')
+                with patch.object(device, 'RELEASE', release), patch.object(device, 'text_property', side_effect=lambda name: {
+                    'compatible':'amlogic,sc2', 'model':'test', 'coreelec-dt-id':dtid}[name]):
+                    with self.assertRaisesRegex(RuntimeError,'当前 DTB'):device.detect(check_kernel=False,runtime_profile=True)
+
+    def test_identity_error_is_not_lost_for_noninteractive_repair(self):
+        with self.assertRaisesRegex(RuntimeError, 'mount failed'):
+            self.detect(board=device.AndroidIdentityUnavailable('mount failed'))

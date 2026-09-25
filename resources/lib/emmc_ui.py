@@ -42,7 +42,7 @@ def run_foreground(result, title):
                 '--parent-pid',str(os.getpid())],stdout=log,stderr=subprocess.STDOUT,
                 env={**os.environ,'PYTHONIOENCODING':'utf-8'})
             while process.poll() is None:
-                state=json.loads((job/'status.json').read_text())
+                state=json.loads((job/'status.json').read_text(encoding='utf-8'))
                 message=state['message'];total=state.get('total_bytes',0)
                 if total:
                     message+='\n已处理 %.2f / %.2f GiB（含校验）' % (state.get('processed_bytes',0)/1024**3,total/1024**3)
@@ -55,17 +55,17 @@ def run_foreground(result, title):
                 if monitor.waitForAbort(0.25):
                     # Kodi shutdown: child records interruption; never detach it as a job.
                     process.terminate();process.wait();return
-            state=json.loads((job/'status.json').read_text())
+            state=json.loads((job/'status.json').read_text(encoding='utf-8'))
             if state['phase'] not in ('complete','failed','needs-recovery','cancelled'):
                 state.update(phase='needs-recovery' if state.get('device_writes_started') else 'failed',
                              message='前台进程异常退出，请查看日志',exit_code=process.returncode)
                 tmp=job/'status.json.tmp';tmp.write_text(json.dumps(state));tmp.replace(job/'status.json')
     except Exception as exc:
         if process is None:
-            state=json.loads((job/'status.json').read_text());state.update(phase='failed',message='前台启动失败：'+str(exc))
+            state=json.loads((job/'status.json').read_text(encoding='utf-8'));state.update(phase='failed',message='前台启动失败：'+str(exc))
             tmp=job/'status.json.tmp';tmp.write_text(json.dumps(state));tmp.replace(job/'status.json')
         if process is not None and process.poll() is None:
-            state=json.loads((job/'status.json').read_text())
+            state=json.loads((job/'status.json').read_text(encoding='utf-8'))
             if not state.get('device_writes_started'):(job/'cancel').touch()
             # Keep ownership if UI updating fails while the disk writer is active.
             process.wait()

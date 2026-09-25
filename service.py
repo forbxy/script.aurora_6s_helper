@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'resources/lib'))
 from config import ADDON_ID, load_profile, migrate_colors
 from effects import encode, levels, software_frame, smooth_levels
 from hardware import Controller
+from diagnostics import exception_details
 
 
 class Monitor(xbmc.Monitor):
@@ -77,7 +78,7 @@ def main():
                     except Exception as restore_error:
                         xbmc.log('[Aurora6S] restore: ' + str(restore_error), xbmc.LOGERROR)
                     if str(exc) != last_error:
-                        xbmc.log('[Aurora6S] ' + str(exc), xbmc.LOGERROR)
+                        xbmc.log(exception_details('lighting'), xbmc.LOGERROR)
                         xbmcgui.Dialog().notification('极光 6S 灯条', str(exc), xbmcgui.NOTIFICATION_ERROR, 5000)
                     last_error = str(exc)
                     # Avoid retrying every frame when hardware is absent on first install.

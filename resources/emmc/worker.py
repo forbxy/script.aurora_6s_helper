@@ -11,6 +11,7 @@ import time
 import uuid
 import signal
 import ctypes
+import traceback
 from progress import ByteProgress
 
 import operations as op
@@ -209,4 +210,4 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as exc:
-        print(str(exc),file=sys.stderr);sys.exit(1)
+        traceback.print_exc();sys.exit(1)

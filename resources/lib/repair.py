@@ -89,7 +89,8 @@ def links(branch):
 
 
 def run(*args, check=True):
-    return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
+    return subprocess.run(args, check=check, capture_output=True, encoding='utf-8', timeout=30,
+                          env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
 
 
 def sha(path):
@@ -138,7 +139,7 @@ def verify_payload():
 
 
 def flash_is_ro():
-    for line in Path('/proc/mounts').read_text().splitlines():
+    for line in Path('/proc/mounts').read_text(encoding='utf-8').splitlines():
         fields = line.split()
         if fields[1] == '/flash':
             return 'ro' in fields[3].split(',')
@@ -163,7 +164,7 @@ def check(confirmed_6s=False, allow_unidentified=False, confirmed_board=None):
             for required in ('/usr/lib/udev/rules.d/80-brcmfmac_pci.rules', '/lib/firmware/brcm/BCM4362A2.hcd'):
                 if not Path(required).is_file():
                     raise RuntimeError('缺少 CE 博通支持文件：' + required)
-        config = Path('/flash/config.ini').read_text()
+        config = Path('/flash/config.ini').read_text(encoding='utf-8')
         # Experimental boot overrides must be removed deliberately, not silently carried over.
         if any(s in config for s in ('amlogic_pcie_init', 'wifi_dummy_init', 'systemd.mask=aurora6s-ng-wifi')):
             raise RuntimeError('config.ini 仍有 PCIe/Wi-Fi 诊断启动参数，请先恢复正常启动配置')
@@ -199,7 +200,7 @@ def restore_file(path, saved, source):
 
 def restore(backup):
     backup = Path(backup)
-    manifest = json.loads((backup / 'manifest.json').read_text())
+    manifest = json.loads((backup / 'manifest.json').read_text(encoding='utf-8'))
     branch = manifest['branch']
     saved_targets = backup_targets(manifest)
     removed = cleanup_targets(branch, manifest['chip']) if manifest.get('format') == 5 else {}
@@ -260,7 +261,7 @@ def install(confirmed_6s=False, confirmed_board=None):
         manifest['files'][name] = snapshot(target, backup / name)
     for name, target in removed.items():
         manifest['removed'][name] = snapshot(target, backup / name)
-    (backup / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+    (backup / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     shutil.copy2(__file__, backup / 'repair.py')
     shutil.copy2(Path(__file__).with_name('device.py'), backup / 'device.py')
     (backup / 'restore.sh').write_text('#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\nexec /usr/bin/python3 repair.py --restore "$PWD"\n')
@@ -315,7 +316,7 @@ def main():
             print(json.dumps({'backup': install(args.confirm_6s, args.confirm_board)}, ensure_ascii=False))
         else:
             profile = detect(confirmed_6s=args.confirm_6s, confirmed_board=args.confirm_board, check_kernel=False)
-            manifest = json.loads((Path(args.restore) / 'manifest.json').read_text())
+            manifest = json.loads((Path(args.restore) / 'manifest.json').read_text(encoding='utf-8'))
             if profile['branch'] != manifest['branch']:
                 raise RuntimeError('备份所属分支与当前系统不同')
             if (profile['board'], profile['chip']) != (manifest.get('board', '6s'), manifest.get('chip', 'rtl8852')):
