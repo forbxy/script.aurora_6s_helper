@@ -5,6 +5,7 @@ import re
 import selectors
 import subprocess
 import time
+from file_attributes import rsync_xattr_filters
 
 
 def rsync_copy(args, update=None, step=None, total=0, timeout=7200):
@@ -43,5 +44,5 @@ def copy_live_storage(source,dest,flags,excludes,run,update=None):
         for name in files:
             path=Path(base)/name
             if path.is_file() and not path.is_symlink():total+=path.stat().st_size
-    args=['rsync',flags,'--numeric-ids',*['--exclude='+p for p in excludes],str(source)+'/',str(dest)+'/']
+    args=['rsync',flags,'--numeric-ids',*rsync_xattr_filters(flags),*['--exclude='+p for p in excludes],str(source)+'/',str(dest)+'/']
     rsync_copy(args,update,'snapshot-copy',total)

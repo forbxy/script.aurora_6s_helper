@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from aurora_emmc import probe, plan, read
+from file_attributes import ignored_attribute_names,rsync_xattr_filters
 
 EXCLUDE = ('aurora-emmc-backups', 'aurora-emmc-staging', 'aurora-emmc-jobs', 'lost+found')
 
@@ -53,7 +54,7 @@ def scan_tree(root):
 
 def rsync_flags(version, inventory, metadata_fallback=False):
     # Separate ACLs from other attributes because rsync implements them separately.
-    names = set(inventory['xattr_names'])
+    names = set(inventory['xattr_names']) - set(ignored_attribute_names())
     acl = {x for x in names if x.startswith('system.posix_acl_')}
     if inventory['counts']['other']:
         raise ValueError('Special source files need explicit migration review')
@@ -77,7 +78,7 @@ def run():
     version = subprocess.run(['rsync', '--version'], check=True, capture_output=True, text=True).stdout
     flags = rsync_flags(version, inventory)
     with tempfile.TemporaryDirectory(prefix='aurora-storage-dryrun-', dir='/tmp') as dest:
-        args = ['rsync', flags, '--numeric-ids', '--stats']
+        args = ['rsync', flags, '--numeric-ids', '--stats'] + rsync_xattr_filters(flags)
         args += ['--exclude=/' + x + '/' for x in EXCLUDE]
         args += ['/storage/', dest + '/']
         p = subprocess.run(args, capture_output=True, text=True, timeout=180,

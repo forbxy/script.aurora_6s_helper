@@ -14,7 +14,7 @@ from aurora_emmc import probe,plan,read
 from layout_trial import atomic_json,private_external
 from inspect_storage import scan_tree,rsync_flags
 from live_snapshot import copy_live_storage,rsync_copy
-from file_attributes import attributes,copy_attributes
+from file_attributes import attributes,copy_attributes,ignored_attribute_names,rsync_xattr_filters
 from prepare_boot import sha,modify_cfgload,configure_rootopt,validate_stock_cfgload,STOCK_CFGLOAD
 
 EXCLUDES=['/aurora-emmc-backups/','/aurora-emmc-staging/','/aurora-emmc-jobs/','/lost+found/',
@@ -90,16 +90,16 @@ def snapshot(folder,boot_stage, live=False, update=None):
         if live:
             copy_live_storage('/storage',dest,flags,EXCLUDES,run,update)
         else:
-            args=['rsync',flags,'--numeric-ids']+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/']
+            args=['rsync',flags,'--numeric-ids']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/']
             run(args,timeout=7200);os.sync()
-            changes=run(['rsync',flags+'nc','--numeric-ids','--itemize-changes']+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/'],timeout=7200)
+            changes=run(['rsync',flags+'nc','--numeric-ids','--itemize-changes']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/'],timeout=7200)
             if changes.strip():raise ValueError('Source changed during quiesced snapshot: '+changes[:2000])
         copy_attributes('/storage',dest,update)
         data=snapshot_inventory(dest,update,'snapshot-verify',include_xattrs=True)
         atomic_json(folder/'manifest.json',dict(schema=1,kind='live-ce-snapshot' if live else 'quiesced-ce-snapshot',boot_stage=str(Path(boot_stage).resolve()),
             boot_manifest_sha256=sha(Path(boot_stage)/'manifest.json'),boot_files=boot['boot_files'],storage=data,
             excludes=EXCLUDES,source_inventory=inventory,services_paused=active,
-            snapshot_xattrs=True,storage_root_xattrs=attributes(dest),
+            snapshot_xattrs=True,storage_root_xattrs=attributes(dest),ignored_xattrs=list(ignored_attribute_names()),
             regular_file_bytes=sum(x.get('bytes',0) for x in data.values()),
             notes=['Snapshot excludes logs/coredumps/Kodi temp and external backup/staging directories.',
                    'Running OS and Android partitions are not modified.']))
@@ -148,7 +148,7 @@ def copy_and_verify(snapshot_path,bootdev,datadev,update=None):
                 run(['mount','-t',fs,'-o','rw,noatime',str(device),str(target)]);mounts.append(target)
             rsync_copy(['rsync','-rt','--modify-window=1',str(stage/'boot')+'/',str(boot)+'/'],update,'install-bootcopy',sum(r['bytes'] for r in manifest['boot_files']))
             flags=rsync_flags(run(['rsync','--version']),manifest['source_inventory'],metadata_fallback=True).replace('n','')
-            rsync_copy(['rsync',flags,'--numeric-ids',str(Path(snapshot_path)/'storage')+'/',str(data)+'/'],update,'install-datacopy',manifest['regular_file_bytes'])
+            rsync_copy(['rsync',flags,'--numeric-ids',*rsync_xattr_filters(flags),str(Path(snapshot_path)/'storage')+'/',str(data)+'/'],update,'install-datacopy',manifest['regular_file_bytes'])
             copy_attributes(Path(snapshot_path)/'storage',data,update)
             os.sync()
             for target in reversed(mounts):run(['umount',str(target)])
