@@ -14,7 +14,7 @@ RELEASE = Path('/etc/os-release')
 NG_RELEASE = '4.9.269'
 KERNEL_CONFIG = Path('/proc/config.gz')
 NG_FLAGS = ('CONFIG_ARM64=y', 'CONFIG_SMP=y', 'CONFIG_PREEMPT=y', 'CONFIG_MODULE_UNLOAD=y', 'CONFIG_MODVERSIONS=y')
-DT_IDS = {'no': 'sc2_s905x4_tencent_aurora_6s',
+DT_IDS = {'no': 'sc2_s905x4_tencent_aurora_6s_hs400',
           'ng': 'sc2_s905x4_tencent_aurora_6s_ng'}
 CPUINFO = Path('/proc/cpuinfo')
 PCI = Path('/sys/bus/pci/devices')
@@ -25,8 +25,8 @@ BOARD_MODELS = {'A4111': '4pro', 'A4112': '6s'}
 PROFILE_IDS = {
     'ng/6s': DT_IDS['ng'], 'no/6s': DT_IDS['no'],
     'ng/4pro/rtl8852': 'sc2_s905x4_tencent_aurora_4pro_rtl8852_ng',
-    'no/4pro/rtl8852': 'sc2_s905x4_tencent_aurora_4pro_rtl8852',
-    'no/4pro/ap6275p': 'sc2_s905x4_tencent_aurora_4pro_ap6275p',
+    'no/4pro/rtl8852': 'sc2_s905x4_tencent_aurora_4pro_rtl8852_hs400',
+    'no/4pro/ap6275p': 'sc2_s905x4_tencent_aurora_4pro_ap6275p_hs400',
     'ng/4pro/ap6275p': 'sc2_s905x4_tencent_aurora_4pro_ap6275p_ng',
 }
 
@@ -162,7 +162,8 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
         # LED control consumes an already-installed board DTB. It neither selects
         # nor installs a repair payload and must not depend on Android mounts.
         for key, dtid in PROFILE_IDS.items():
-            if key.startswith(branch + '/') and ident == dtid:
+            if key.startswith(branch + '/') and (ident == dtid or
+                    (branch == 'no' and ident == dtid.removesuffix('_hs400'))):
                 parts = key.split('/')
                 board = parts[1]
                 chip = parts[2] if len(parts) == 3 else 'rtl8852'

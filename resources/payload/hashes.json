@@ -20,11 +20,11 @@
   "ng/6s/rtkm.ko": "65bc6cf8916ad3d3b9c6becef351c4730bd7ed6c56a3f2424bee60b7d9dac141",
   "ng/6s/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2",
   "no/4pro/ap6275p/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
-  "no/4pro/ap6275p/dtb.img": "5c2b4df0698a7cfb030d5e1daa3a4f0c2e0a36e20eb790e8604df84afa2b0243",
+  "no/4pro/ap6275p/dtb.img": "15d7235982295e40ad6ee64fbbcfb6ddcd211d687326992a348a83dc9ecb486c",
   "no/4pro/rtl8852/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
-  "no/4pro/rtl8852/dtb.img": "5219356f97b74c7856acd8399409a22e0b7b38f9ff2db2790aea5b4a6624226e",
+  "no/4pro/rtl8852/dtb.img": "8c15ac006896dbec9530071ce2329081fda5d04e97fcf314c4dec08871748d5a",
   "no/4pro/rtl8852/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2",
   "no/6s/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
-  "no/6s/dtb.img": "b549e3f325683b51342d9769ef53d0084fc3ffc33865f29874685e25635d38ef",
+  "no/6s/dtb.img": "9e4b07aa3006f76a5f040c44742e8431a9f6a4d536561d3c2d58c02023fcf553",
   "no/6s/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2"
 }
