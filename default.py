@@ -23,16 +23,20 @@ def main():
     addon = xbmcaddon.Addon(ADDON_ID)
     choice = sys.argv[1] if len(sys.argv) > 1 else ''
     if not choice:
-        selected = dialog.select('极光 4 Pro / 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）', 'eMMC 双系统与备份'])
+        selected = dialog.select('极光 4 Pro / 6S 助手', ['修复硬件（自动识别 NG / NO）', '设置灯条（常规 / 播放）', 'eMMC 双系统与备份', '启动第一屏'])
         if selected < 0:
             return
-        choice = ('repair', 'lights', 'emmc')[selected]
+        choice = ('repair', 'lights', 'emmc', 'logo')[selected]
         if choice == 'lights':
             action = dialog.select('灯条设置', ['色盘选色与灯光效果', '精确输入颜色值'])
             if action < 0:
                 return
             if action == 1:
                 choice = 'custom-color'
+    if choice == 'logo':
+        import logo_ui
+        logo_ui.main()
+        return
     if choice == 'emmc':
         import emmc_ui
         emmc_ui.main()

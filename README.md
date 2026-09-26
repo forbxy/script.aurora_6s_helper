@@ -71,3 +71,11 @@
 - 安装逻辑来自本项目 `CE_android/tools` 已有研究流程，集成后增加双机型检查、限定范围的 loop 映射、任务管理、移除与备份还原。
 - 分区候选生成使用 [7Ji/ampart](https://github.com/7Ji/ampart/tree/1539ff2f6fa73ef78dfde3ac585fb9c93244e85e)，仅对临时稀疏镜像运行；不让 ampart 直接修改真实 eMMC。附带 GPL-3.0 源码和许可。
 - 对照参考 [AM9 Pro 开源安装器](https://github.com/dangerouslaser/ugoos-am9-pro-coreelec-emmc/blob/581ca4f7a441461b957d814cc9beb1a1cca6cfe5/ce-emmc-install.sh) 的分区重读处理；本助手保留 Amlogic MPT，不采用该项目清除 MPT / 改用 GPT 的流程。
+
+### 启动第一屏
+
+- 查看当前第一屏，选择 PNG/JPG/BMP 图片并预览、更换 Android/CE 共用的开机第一屏。
+- 恢复内置、校验过的原厂“腾讯极光 / 互联八方”素材。素材来自 6S，当前测试 4 Pro 使用相同资源包；以预览显示的图片为准。
+- 图片等比缩放居中，空白及透明区域为黑色；原厂素材压缩存放，使用时解压校验。
+- 仅写入独立 Logo 分区，不清空应用或用户数据；写前保存压缩备份，写后读回校验，重启后生效。无需常驻服务。
+- 需要系统 Python 提供 Pillow；支持机型与分区检查通过后才允许写入。写入期间不能断电或拔盘。
