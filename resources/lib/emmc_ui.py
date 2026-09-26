@@ -6,6 +6,7 @@ import subprocess
 import time
 import xbmc
 import xbmcgui
+from diagnostics import user_message
 
 WORKER=Path(__file__).resolve().parents[1]/'emmc/worker.py'
 TITLES={'install':'安装 Android / CE 双系统','remove':'移除 eMMC 中的 CE','backup':'完整备份 eMMC','restore':'从完整备份还原 eMMC','repair':'修复 OTA 后的双系统布局（NO）'}
@@ -25,6 +26,11 @@ def call(*args):
 
 def show_status():
     state=call('status');text=state['message']
+    if state.get('phase') in ('failed','needs-recovery'):
+        xbmc.log('[Aurora6S] eMMC task: ' + text, xbmc.LOGERROR)
+        text=user_message(text)
+        if state.get('phase')=='needs-recovery':
+            text+='\n任务可能已修改 eMMC，请勿重复操作，先检查日志和设备状态。'
     if state.get('phase') not in (None,'none','idle','complete','failed','needs-recovery','cancelled'):
         text=operation_message(text)
     if state.get('backup'):text+='\n备份：'+state['backup']

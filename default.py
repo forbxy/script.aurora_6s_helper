@@ -11,7 +11,7 @@ import xbmcgui
 sys.path.insert(0, str(Path(__file__).parent / 'resources/lib'))
 from config import ADDON_ID, parse_color
 import repair
-from diagnostics import exception_details
+from diagnostics import exception_details, user_message
 
 
 def notify_service():
@@ -66,7 +66,8 @@ def main():
         else:
             info = json.loads(p.read_text(encoding='utf-8'))
             if 'error' in info:
-                dialog.ok('灯条状态', info['error'])
+                xbmc.log('[Aurora6S] lighting status: ' + info['error'], xbmc.LOGERROR)
+                dialog.ok('灯条状态', user_message(info['error']))
             else:
                 profile = info['profile']
                 scene = '播放' if profile['name'] == 'playback' else '常规'
@@ -79,7 +80,7 @@ def main():
     profile = repair.check(allow_unidentified=True)
     if not profile['board']:
         if profile.get('identity_error'):
-            dialog.ok('无法自动识别实物机型', profile['identity_error'] + '\n当前 DTB 名称不能证明实物机型，请按盒子标签确认。')
+            dialog.ok('无法自动识别实物机型', user_message(profile['identity_error']) + '\n当前 DTB 名称不能证明实物机型，请按盒子标签确认。')
         if profile.get('model_choice_required'):
             selected = dialog.select('A4111 / rev D：请选择实物机型', ['极光 4 Pro', '极光 6S'])
             choices = ('4pro', '6s')
@@ -129,4 +130,4 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         xbmc.log(exception_details('UI'), xbmc.LOGERROR)
-        xbmcgui.Dialog().ok('极光6S/4Pro助手', str(exc))
+        xbmcgui.Dialog().ok('极光6S/4Pro助手', user_message(exc) + '\n详细信息已记录到 Kodi 日志。')
