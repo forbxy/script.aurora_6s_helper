@@ -100,6 +100,9 @@ def assess(action=None, backup=None, android_gib=None):
             for tool in ('losetup','mkfs.vfat','mkfs.ext4','rsync'):
                 if not shutil.which(tool):raise ValueError('缺少工具：'+tool)
             if list(Path('/storage/.update').glob('*')):raise ValueError('请先完成或移走待安装的 CE 更新包')
+        if action == 'repair':
+            import ota_repair
+            ota_repair.assess(report)
         if action == 'restore':
             if not backup:raise ValueError('未选择备份')
             folder = private_external(backup);inspect(folder)

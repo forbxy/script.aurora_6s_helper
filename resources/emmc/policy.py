@@ -150,6 +150,9 @@ def backup_matches(report, saved):
 
 
 def confirmation(action, reset, risk):
+    if action == 'repair':
+        if not risk:raise ValueError('必须确认布局修复风险和免责说明')
+        return
     if action not in ('install', 'remove', 'backup', 'restore'):raise ValueError('未知操作')
     if action != 'backup' and not (reset and risk):
         raise ValueError('必须确认 Android 数据重置/覆盖和免责说明')

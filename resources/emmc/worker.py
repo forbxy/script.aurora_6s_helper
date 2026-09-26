@@ -117,6 +117,11 @@ def execute(folder):
         if request['boot_id']!=read('/proc/sys/kernel/random/boot_id'):raise ValueError('开始任务前系统已重启，请重新检查')
         update('preparing','核对操作条件',foreground_pid=os.getpid(),foreground_start=process_start(os.getpid()))
         live=op.assess(action,request['source_backup'],request.get('android_gib'));op.same_device(request['report'],live)
+        if action=='repair':
+            import ota_repair
+            ota_repair.execute(folder,live,update)
+            update('complete','双系统布局修复完成，DTB/MPT 已读回验证，env/misc 保持不变。请保留外置启动盘重启后检查，再测试内置 CE 和 Android；暂勿再次 OTA。',reboot_required=True)
+            return
         if action in ('backup','restore'):
             sizes={'mmcblk0':live['emmc_bytes'],**live['boot_areas']}
             plan={((phase+':'+name+'.img') if phase=='verifying' else phase+':'+name):size
@@ -188,8 +193,8 @@ def execute(folder):
 def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser();sub=parser.add_subparsers(dest='command',required=True)
-    a=sub.add_parser('probe');a.add_argument('--action',choices=('install','remove','backup','restore'));a.add_argument('--backup');a.add_argument('--android-gib',type=int)
-    a=sub.add_parser('submit');a.add_argument('action',choices=('install','remove','backup','restore'));a.add_argument('--backup');a.add_argument('--android-gib',type=int);a.add_argument('--reset-android',action='store_true');a.add_argument('--accept-risk',action='store_true')
+    a=sub.add_parser('probe');a.add_argument('--action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int)
+    a=sub.add_parser('submit');a.add_argument('action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int);a.add_argument('--reset-android',action='store_true');a.add_argument('--accept-risk',action='store_true')
     a=sub.add_parser('run');a.add_argument('folder');a.add_argument('--parent-pid',type=int)
     sub.add_parser('status');sub.add_parser('backups')
     args=parser.parse_args()

@@ -77,3 +77,12 @@ The copy pipeline now allows rsync builds without -A/-X and separately preserves
 ### Separate platform backends
 
 `no_backend.py` owns NO loop mapping, live partition-view checkpoint and native CE environment access. `ng_backend.py` owns NG dm-linear mapping, whole-device post-write identity checks and bounded env access. The common operations module dispatches through a validated release identity. UI, explicit consent, size planning, fixed-system-partition validation, metadata generation/readback, raw backup/restore and file-copy verification remain shared to avoid diverging protection rules. Compatibility wrappers remain for recorded recovery scripts; they delegate to NG implementations. Both backends are included in the 1.5.5 package.
+
+
+## OTA layout recovery (1.5.13, NO 22.x only)
+
+The explicit `repair` action uses `ota_repair.py` / `ota_repair_core.py`, adapted from standalone 0.1.2, validated on an A4111 box through internal CE and Android boot. It reconstructs the known helper layout from live CE FAT32/ext4 headers, without consulting installation records. Preview rejects NG, healthy dual layouts, missing filesystems, unknown geometry or boot scripts. Full read-only filesystem and boot payload checks run in the foreground worker; no snapshot copy, formatting, userdata reset, environment update, full backup or automatic reboot is invoked.
+
+Only the Android DTB pair and MPT are written. All environment variables and misc remain unchanged; full env/misc hashes are checked before/after. Small original metadata artifacts and a schema-2 layout-only plan are retained in the job's `layout-repair` subdirectory. Existing worker locks and lifecycle apply, cancellation is allowed only before the first write, and interrupted writes require manual recovery review. Old standalone plans cannot be submitted via the UI. Reboot to external CE before any further disk operation, then separately test internal CE and Android. This does not establish Android OTA compatibility.
+
+The UI displays filesystem check phases without invented byte progress; boot-file hashing and metadata write/readback have byte accounting. The standalone hardware validation does not replace end-to-end testing of the integrated plugin flow.

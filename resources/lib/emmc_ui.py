@@ -8,7 +8,7 @@ import xbmc
 import xbmcgui
 
 WORKER=Path(__file__).resolve().parents[1]/'emmc/worker.py'
-TITLES={'install':'安装 Android / CE 双系统','remove':'移除 eMMC 中的 CE','backup':'完整备份 eMMC','restore':'从完整备份还原 eMMC'}
+TITLES={'install':'安装 Android / CE 双系统','remove':'移除 eMMC 中的 CE','backup':'完整备份 eMMC','restore':'从完整备份还原 eMMC','repair':'修复 OTA 后的双系统布局（NO）'}
 OPERATION_NOTICE='操作期间请勿取消、断电、拔盘、退出 Kodi 或进行任何其他操作，请等待完成。'
 
 
@@ -78,7 +78,7 @@ def main():
     dialog=xbmcgui.Dialog()
     choice=dialog.select('eMMC 双系统与备份',list(TITLES.values())+['查看任务状态'])
     if choice<0:return
-    if choice==4:show_status();return
+    if choice==len(TITLES):show_status();return
     action=list(TITLES)[choice];backup=None
     if action=='restore':
         rows=call('backups')
@@ -106,6 +106,14 @@ def main():
     if action=='backup':
         warning='将完整备份 eMMC 用户区和 boot0/boot1，并读回校验。不会修改 eMMC，也不需要重启。备份不包含 RPMB/eFuse，不是线刷包。需保持供电和外置盘连接。'
         button='开始备份'
+    elif action=='repair':
+        rows=report['ota_repair']['partitions'];boot,data,android=rows[-3:]
+        warning=('适用于 Android OTA 后分区表回到原厂布局，但原 CE 文件系统仍完整的情况。将按现场数据恢复分区映射，不依赖旧安装记录。\n'
+            '只写 DTB/MPT，不格式化、不主动重置 Android，不修改启动环境或 A/B 槽位。不能保证已损坏的数据可恢复，也不解决再次 OTA 的兼容性。\n'
+            'CE 启动区 %.2f GiB，CE 数据区 %.2f GiB，Android 用户区 %.2f GiB。\n'
+            '本操作不做整盘备份，仅保存修复前的分区元数据、env 和 misc。可能造成数据丢失或无法启动，插件作者不对修复造成的任何损失负责。\n'
+            '完成后必须保留外置启动盘重启检查；重启前不要安装、卸载或再次修复。') % (boot['size']/1024**3,data['size']/1024**3,android['size']/1024**3)
+        button='同意并修复布局'
     elif action=='restore':
         warning=('将用所选备份覆盖当前 CE、Android、用户数据和 boot0/boot1，当前数据不会保留；仅恢复备份时的内容，不保证恢复加密数据。\n'
             '安装/移除双系统会重置 Android。插件作者不对刷双系统或备份还原造成的任何损失负责。\n'
@@ -122,7 +130,8 @@ def main():
     warning+='\n开始前请先停止播放、媒体库同步、扫描和刮削。\n'+OPERATION_NOTICE
     if not dialog.yesno(TITLES[action],summary+warning,nolabel='取消',yeslabel=button):return
     args=['submit',action]
-    if action!='backup':args+=['--reset-android','--accept-risk']
+    if action=='repair':args+=['--accept-risk']
+    elif action!='backup':args+=['--reset-android','--accept-risk']
     if backup:args+=['--backup',backup]
     if android_gib is not None:args+=['--android-gib',str(android_gib)]
     result=call(*args)
