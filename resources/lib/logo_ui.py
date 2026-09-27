@@ -46,8 +46,11 @@ class Preview(xbmcgui.WindowDialog):
         self.setFocus(self.back)
 
     def onControl(self, control):
-        if control==self.back:self.close()
-        elif self.writable and control==self.next:self.accepted=True;self.close()
+        # Kodi callbacks can wrap the same GUI control in a new Python object.
+        # Match the stable control ID, not Python object identity/equality.
+        control_id=control.getId()
+        if control_id==self.back.getId():self.close()
+        elif self.writable and control_id==self.next.getId():self.accepted=True;self.close()
 
     def onAction(self, action):
         if action.getId() in (9,10,92,216):self.close()

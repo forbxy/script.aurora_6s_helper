@@ -82,6 +82,25 @@ def boot_image(raw):
     return decode(payload)
 
 
+def pillow_bytes(data):
+    """Promote a 56-byte BMP DIB to V4 for older Pillow, in memory only."""
+    if len(data) < 18 or data[:2] != b'BM' or struct.unpack_from('<I', data, 14)[0] != 56:
+        return data
+    if len(data) < 70:
+        raise ValueError('BMP 图片头不完整')
+    offset = struct.unpack_from('<I', data, 10)[0]
+    if not 70 <= offset <= len(data):
+        raise ValueError('BMP 像素数据位置无效')
+    # V3 already contains all four channel masks. V4 appends color-space
+    # fields; pixel encoding, row padding and orientation remain unchanged.
+    header = bytearray(data[:70] + bytes(52))
+    struct.pack_into('<I', header, 2, len(data) + 52)
+    struct.pack_into('<I', header, 10, offset + 52)
+    struct.pack_into('<I', header, 14, 108)
+    struct.pack_into('<I', header, 70, 0x73524742)  # LCS_sRGB
+    return bytes(header) + data[70:]
+
+
 def decode(data):
     try:
         from PIL import Image, ImageOps
@@ -90,7 +109,7 @@ def decode(data):
     if len(data) > MAX_IMAGE:raise ValueError('图片文件不能超过 32 MiB')
     with warnings.catch_warnings():
         warnings.simplefilter('error', Image.DecompressionBombWarning)
-        with Image.open(io.BytesIO(data)) as source:
+        with Image.open(io.BytesIO(pillow_bytes(data))) as source:
             if source.format not in ('PNG','JPEG','BMP'):
                 raise ValueError('只支持 PNG、JPEG 和 BMP 图片')
             if source.width * source.height > 24_000_000:

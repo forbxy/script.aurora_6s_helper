@@ -46,6 +46,7 @@ class LogoCodecTests(unittest.TestCase):
    if name!='bootup':self.assertEqual(entries[name],payload)
   bmp=gzip.decompress(entries['bootup'])
   self.assertEqual(struct.unpack_from('<I',bmp,10)[0],70)
+  self.assertEqual(struct.unpack_from('<I',bmp,14)[0],56)
   self.assertEqual(struct.unpack_from('<H',bmp,28)[0],16)
   self.assertEqual(struct.unpack_from('<I',bmp,30)[0],3)
   self.assertEqual(codec.boot_image(candidate).getpixel((960,540)),(0,0,255))
@@ -96,9 +97,68 @@ class LogoWriterTests(unittest.TestCase):
    with patch.object(b,'read_logo',return_value=b'wrong'):
     with self.assertRaisesRegex(ValueError,'读回校验'):b.write_verified(f.fileno(),raw)
 
+
+class LegacyBMPTests(unittest.TestCase):
+ def test_stock_header_promotion_preserves_pixels(self):
+  bmp=gzip.decompress(dict(codec.unpack(codec.stock(ROOT/'stock-logo.img.gz')))['bootup'])
+  compatible=codec.pillow_bytes(bmp);offset=struct.unpack_from('<I',bmp,10)[0]
+  self.assertEqual(struct.unpack_from('<I',compatible,14)[0],108)
+  self.assertEqual(struct.unpack_from('<I',compatible,10)[0],offset+52)
+  self.assertEqual(compatible[54:70],bmp[54:70])
+  self.assertEqual(compatible[offset+52:],bmp[offset:])
+  self.assertEqual(struct.unpack_from('<I',bmp,14)[0],56)
+ def test_invalid_headers(self):
+  bmp=bytearray(gzip.decompress(dict(codec.unpack(codec.stock(ROOT/'stock-logo.img.gz')))['bootup']))
+  with self.assertRaises(ValueError):codec.pillow_bytes(bytes(bmp[:69]))
+  for offset in (0,54,len(bmp)+1):
+   struct.pack_into('<I',bmp,10,offset)
+   with self.assertRaises(ValueError):codec.pillow_bytes(bytes(bmp))
+ @unittest.skipUnless(Image,'Pillow integration')
+ def test_rgb565_padding_and_both_orientations(self):
+  top=struct.pack('<3H',0xf800,0x07e0,0x001f)+b'\0\0'
+  bottom=struct.pack('<3H',0xffff,0,0xffe0)+b'\0\0'
+  real_open=Image.open
+  def legacy_open(stream,*args,**kwargs):
+   data=stream.getvalue()
+   if data[:2]==b'BM' and struct.unpack_from('<I',data,14)[0]==56:
+    raise OSError('Unsupported BMP header type (56)')
+   return real_open(stream,*args,**kwargs)
+  for height,pixels in ((2,bottom+top),(-2,top+bottom)):
+   header=bytearray(70)
+   struct.pack_into('<2sIHHI',header,0,b'BM',86,0,0,70)
+   struct.pack_into('<IiiHHIIiiII',header,14,56,3,height,1,16,3,16,0,0,0,0)
+   struct.pack_into('<4I',header,54,0xf800,0x07e0,0x001f,0)
+   with patch.object(Image,'open',side_effect=legacy_open):
+    with Image.open(io.BytesIO(codec.pillow_bytes(bytes(header)+pixels))) as img:
+     self.assertEqual(list(img.getdata()),[(255,0,0),(0,255,0),(0,0,255),(255,255,255),(0,0,0),(255,255,0)])
+    self.assertEqual(codec.decode(bytes(header)+pixels).size,(1920,1080))
+
 if __name__=='__main__':unittest.main()
 
 class LogoUITests(unittest.TestCase):
+ def test_preview_callbacks_use_control_ids(self):
+  import types
+  from unittest.mock import MagicMock
+  spec=importlib.util.spec_from_file_location('logo_ui_callbacks_test',ROOT.parent/'lib/logo_ui.py')
+  ui=importlib.util.module_from_spec(spec)
+  gui=types.ModuleType('xbmcgui');gui.WindowDialog=object
+  with patch.dict(sys.modules,{'xbmcgui':gui,'xbmc':types.ModuleType('xbmc'),'xbmcvfs':types.ModuleType('xbmcvfs')}):spec.loader.exec_module(ui)
+  def control(value):return types.SimpleNamespace(getId=lambda:value)
+  for writable,clicked,closed,accepted in ((False,101,True,False),(True,101,True,False),(True,102,True,True),(False,102,False,False),(True,999,False,False)):
+   view=object.__new__(ui.Preview)
+   view.writable=writable;view.accepted=False;view.back=control(101)
+   if writable:view.next=control(102)
+   view.close=MagicMock()
+   callback=control(clicked)
+   self.assertIsNot(callback,view.back)
+   view.onControl(callback)
+   self.assertEqual(view.close.called,closed)
+   self.assertEqual(view.accepted,accepted)
+  for action_id in (9,10,92,216):
+   view.accepted=False;view.close.reset_mock()
+   view.onAction(control(action_id))
+   view.close.assert_called_once();self.assertFalse(view.accepted)
+
  def test_preview_cancel_and_final_confirmation(self):
   import types
   from unittest.mock import MagicMock
