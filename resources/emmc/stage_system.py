@@ -16,12 +16,11 @@ from inspect_storage import scan_tree,rsync_flags
 from live_snapshot import copy_live_storage,rsync_copy
 from file_attributes import attributes,copy_attributes,ignored_attribute_names,rsync_xattr_filters
 from prepare_boot import sha,modify_cfgload,configure_rootopt,validate_stock_cfgload,STOCK_CFGLOAD
+from boot_files import boot_manifest_inventory, scan_boot, verify_boot_tree
 
 EXCLUDES=['/aurora-emmc-backups/','/aurora-emmc-staging/','/aurora-emmc-jobs/','/lost+found/',
           '/.kodi/temp/','/.cache/log/','/.cache/cores/','/logfiles/']
 SERVICES=['kodi.service','bluetooth.service','cron.service','smbd.service','nmbd.service','connman.service']
-BOOT_REQUIRED={'kernel.img','SYSTEM','dtb.img','config.ini','cfgload'}
-BOOT_ALLOWED=BOOT_REQUIRED|{'resolution.ini','dovi.ko','kernel.img.md5','SYSTEM.md5','dtb.xml'}
 
 
 def run(args,timeout=120):
@@ -30,14 +29,19 @@ def run(args,timeout=120):
     return p.stdout
 
 
-def validate_boot(stage):
+def validate_boot(stage, source_root=Path('/flash')):
     stage=private_external(stage)
-    manifest=json.loads((stage/'manifest.json').read_text());rows=manifest['boot_files'];names=[r['file'] for r in rows]
-    if len(set(names))!=len(names) or not BOOT_REQUIRED<=set(names)<=BOOT_ALLOWED:raise ValueError('Unexpected boot file inventory')
+    manifest=json.loads((stage/'manifest.json').read_text());rows=manifest['boot_files']
+    files,directories=boot_manifest_inventory(manifest)
+    verify_boot_tree(stage/'boot',manifest)
+    if manifest.get('schema')==3:
+        source_files,source_dirs=scan_boot(source_root,exclude_device_trees=True)
+        if set(source_files)!=set(files) or source_dirs!=directories:
+            raise ValueError('源启动目录清单发生变化')
     strategy=manifest.get('boot_strategy')
     if strategy not in (None,'stock-cfgload-config-rootopt'):raise ValueError('Unknown boot strategy')
     for row in rows:
-        source=STOCK_CFGLOAD if strategy and row['file']=='cfgload' else Path('/flash')/row['file']
+        source=STOCK_CFGLOAD if strategy and row['file']=='cfgload' else Path(source_root)/row['file']
         if strategy and row.get('source_path')!=str(source):raise ValueError('Unexpected boot source path')
         copy=stage/'boot'/row['file']
         if source.is_symlink() or copy.is_symlink() or not copy.is_file():raise ValueError('Unsafe boot file')
@@ -46,9 +50,9 @@ def validate_boot(stage):
     if strategy:
         expected=validate_stock_cfgload(STOCK_CFGLOAD.read_bytes())
         if (stage/'boot/cfgload').read_bytes()!=expected:raise ValueError('Stock boot script differs')
-        if (stage/'boot/config.ini').read_bytes()!=configure_rootopt(Path('/flash/config.ini').read_bytes()):
+        if (stage/'boot/config.ini').read_bytes()!=configure_rootopt((Path(source_root)/'config.ini').read_bytes()):
             raise ValueError('Internal config transformation differs')
-    elif (stage/'boot/cfgload').read_bytes()!=modify_cfgload(Path('/flash/cfgload').read_bytes()):
+    elif (stage/'boot/cfgload').read_bytes()!=modify_cfgload((Path(source_root)/'cfgload').read_bytes()):
         raise ValueError('Legacy boot script transformation differs')
     return manifest
 
@@ -155,6 +159,7 @@ def copy_and_verify(snapshot_path,bootdev,datadev,update=None):
             mounts=[]
             for device,target,fs in [(bootdev,boot,'vfat'),(datadev,data,'ext4')]:
                 run(['mount','-t',fs,'-o','ro',str(device),str(target)]);mounts.append(target)
+            verify_boot_tree(boot,json.loads((stage/'manifest.json').read_text()))
             checked=0
             for row in manifest['boot_files']:
                 if sha(boot/row['file'])!=row['sha256']:raise ValueError('Boot copy hash mismatch: '+row['file'])

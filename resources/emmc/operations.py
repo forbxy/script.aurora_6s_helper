@@ -126,6 +126,9 @@ def assess(action=None, backup=None, android_gib=None):
                 raise ValueError('所选容量无法容纳当前 CE 数据及预留空间，请减少 Android 用户区容量')
             report.update(capacity_choices=choices, android_gib=selected,
                           ce_storage_bytes=target[29]['size'], ce_system_bytes=target[28]['size'])
+            boot_files,boot_dirs=prepare_boot.source_inventory(partition_bytes=target[28]['size'])
+            report['boot_source_bytes']=sum(boot_files.values())
+            report['boot_source_files']=len(boot_files)
             needed += usage + 1024*MIB
         if available < needed:raise ValueError('外置空间不足：需约 %.1f GiB 可用空间（本次操作暂存）'%(needed/1024**3))
         report['required_free_bytes']=needed

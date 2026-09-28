@@ -12,6 +12,7 @@ import uuid
 import zlib
 
 from aurora_emmc import probe, plan, read
+from boot_files import BOOT_REQUIRED, BOOT_EXCLUDES, scan_boot, check_boot_capacity
 
 
 def sha(path):
@@ -79,6 +80,42 @@ def modify_cfgload(raw):
     return bytes(h)+payload
 
 
+def source_inventory(root=Path('/flash'), partition_bytes=1024**3):
+    files, directories = scan_boot(root, exclude_device_trees=True)
+    if not BOOT_REQUIRED <= set(files):raise ValueError('缺少 CE 必需启动文件')
+    stock = validate_stock_cfgload(STOCK_CFGLOAD.read_bytes())
+    config = configure_rootopt((Path(root)/'config.ini').read_bytes())
+    sizes = dict(files, cfgload=len(stock), **{'config.ini': len(config)})
+    check_boot_capacity(sizes, directories, partition_bytes)
+    return files, directories
+
+
+def stage_files(source, out):
+    """Copy boot content except root device_trees/aml_autoscript; transform two files."""
+    source, out = Path(source), Path(out)
+    files, directories = source_inventory(source)
+    boot = out/'boot';boot.mkdir()
+    for name in directories:(boot/name).mkdir()
+    entries=[]
+    for name in sorted(files):
+        src=STOCK_CFGLOAD if name=='cfgload' else source/name
+        if src.is_symlink() or not stat.S_ISREG(src.stat().st_mode):raise RuntimeError('Source not a regular file')
+        before=sha(src)
+        with src.open('rb') as f,(boot/name).open('xb') as target:
+            while chunk:=f.read(4*1024**2):target.write(chunk)
+            target.flush();os.fsync(target.fileno())
+        if before!=sha(boot/name) or before!=sha(src):raise RuntimeError('Source changed or copy hash mismatch')
+        entries.append(dict(file=name,source_path=str(src),source_sha256=before))
+    if scan_boot(source, exclude_device_trees=True)!=(files,directories):
+        raise ValueError('暂存期间启动文件清单发生变化')
+    raw=(boot/'config.ini').read_bytes();(out/'original-config.ini').write_bytes(raw)
+    with (boot/'config.ini').open('wb') as f:
+        f.write(configure_rootopt(raw));f.flush();os.fsync(f.fileno())
+    for row in entries:row.update(sha256=sha(boot/row['file']),bytes=(boot/row['file']).stat().st_size)
+    check_boot_capacity({r['file']:r['bytes'] for r in entries}, directories)
+    return entries, directories
+
+
 def stage():
     os.umask(0o077)
     report=probe();plan(report,20,1024,'reset-data',16)
@@ -92,27 +129,9 @@ def stage():
         if mountpoint.startswith('/storage/') and (str(parent)==mountpoint or str(parent).startswith(mountpoint+'/')):
             raise RuntimeError('Nested staging mount refused')
     name=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
-    out=parent/name;out.mkdir(mode=0o700);boot=out/'boot';boot.mkdir()
-    mandatory=['kernel.img','SYSTEM','dtb.img','config.ini','cfgload']
-    optional=['resolution.ini','dovi.ko','kernel.img.md5','SYSTEM.md5','dtb.xml']
-    files=mandatory+[x for x in optional if Path('/flash',x).exists()]
-    entries=[]
-    validate_stock_cfgload(STOCK_CFGLOAD.read_bytes())
-    configure_rootopt(Path('/flash/config.ini').read_bytes())
-    for name in files:
-        src=STOCK_CFGLOAD if name=='cfgload' else Path('/flash',name)
-        if src.is_symlink() or not stat.S_ISREG(src.stat().st_mode):raise RuntimeError('Source not a regular file')
-        before=sha(src)
-        with src.open('rb') as f,(boot/name).open('xb') as target:
-            while chunk:=f.read(4*1024**2):target.write(chunk)
-            target.flush();os.fsync(target.fileno())
-        if before!=sha(boot/name) or before!=sha(src):raise RuntimeError('Source changed or copy hash mismatch')
-        entries.append(dict(file=name,source_path=str(src),source_sha256=before))
-    raw=(boot/'config.ini').read_bytes();(out/'original-config.ini').write_bytes(raw)
-    with (boot/'config.ini').open('wb') as f:
-        f.write(configure_rootopt(raw));f.flush();os.fsync(f.fileno())
-    for row in entries:row.update(sha256=sha(boot/row['file']),bytes=(boot/row['file']).stat().st_size)
-    manifest=dict(schema=2,boot_strategy="stock-cfgload-config-rootopt",installation_ready=False,boot_files=entries,os_release=report['os_release'],
+    out=parent/name;out.mkdir(mode=0o700)
+    entries,directories=stage_files(Path('/flash'),out)
+    manifest=dict(schema=3,boot_directories=directories,boot_excludes=BOOT_EXCLUDES,boot_strategy="stock-cfgload-config-rootopt",installation_ready=False,boot_files=entries,os_release=report['os_release'],
                   original_android_dtb_sha256=report['android_dtb_sha256'],
                   notes=['Boot files only; /storage migration is not performed',
                          'Not a mountable FAT image; not deployed to internal storage',
