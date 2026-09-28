@@ -82,9 +82,13 @@ def run_foreground(result, title):
 
 def main():
     dialog=xbmcgui.Dialog()
-    choice=dialog.select('eMMC 双系统与备份',list(TITLES.values())+['查看任务状态'])
+    choice=dialog.select('eMMC 双系统与备份',list(TITLES.values())+['查看任务状态','查看 eMMC 健康度'])
     if choice<0:return
     if choice==len(TITLES):show_status();return
+    if choice==len(TITLES)+1:
+        report=call('health')
+        dialog.textviewer('eMMC 健康度',report['text'])
+        return
     action=list(TITLES)[choice];backup=None
     if action=='restore':
         rows=call('backups')

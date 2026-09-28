@@ -31,6 +31,15 @@ class RecoveryUITests(unittest.TestCase):
         with patch.dict(sys.modules,{'xbmc':types.ModuleType('xbmc'),'xbmcgui':types.ModuleType('xbmcgui')}):spec.loader.exec_module(ui)
         return ui
 
+    def test_health_does_not_enter_disk_operation_flow(self):
+        from unittest.mock import MagicMock
+        ui=self.load_ui();dialog=MagicMock();dialog.select.return_value=len(ui.TITLES)+1
+        with patch.object(ui.xbmcgui,'Dialog',return_value=dialog,create=True),patch.object(ui,'call',return_value={'text':'寿命估计 0%–10%'}) as call,patch.object(ui,'run_foreground') as foreground:
+            ui.main()
+            call.assert_called_once_with('health')
+            dialog.textviewer.assert_called_once_with('eMMC 健康度','寿命估计 0%–10%')
+            dialog.yesno.assert_not_called();foreground.assert_not_called()
+
     def test_repair_confirmation_and_cancel(self):
         from unittest.mock import MagicMock
         for accepted in (False,True):

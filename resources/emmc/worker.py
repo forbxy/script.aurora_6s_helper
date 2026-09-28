@@ -196,7 +196,7 @@ def main():
     a=sub.add_parser('probe');a.add_argument('--action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int)
     a=sub.add_parser('submit');a.add_argument('action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int);a.add_argument('--reset-android',action='store_true');a.add_argument('--accept-risk',action='store_true')
     a=sub.add_parser('run');a.add_argument('folder');a.add_argument('--parent-pid',type=int)
-    sub.add_parser('status');sub.add_parser('backups')
+    sub.add_parser('status');sub.add_parser('backups');sub.add_parser('health')
     args=parser.parse_args()
     if args.command=='probe':result=op.assess(args.action,args.backup,args.android_gib)
     elif args.command=='submit':result=submit(args.action,args.backup,args.reset_android,args.accept_risk,args.android_gib)
@@ -208,6 +208,9 @@ def main():
             def interrupted(signum,frame):raise RuntimeError('Kodi 前台进程中断')
             signal.signal(signal.SIGTERM,interrupted)
         execute(args.folder);return
+    elif args.command=='health':
+        from health import probe as health_probe
+        result=health_probe()
     elif args.command=='status':result=status()
     else:result=list_backups()
     print(json.dumps(result,ensure_ascii=False))
