@@ -182,8 +182,6 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
     source = 'android' if board else ''
     revision, actual_chip = soc_revision(), pci_chip()
     model_choice_required = board == '4pro' and revision == 'D'
-    if model_choice_required and actual_chip and actual_chip != 'rtl8852':
-        raise RuntimeError('PCI 无线芯片与 A4111 rev D 不匹配，拒绝选择修复包')
     confirmed = confirmed_board or ('6s' if confirmed_6s else None)
     if confirmed_6s and confirmed_board not in (None, '6s'):
         raise RuntimeError('手动确认的机型冲突')
@@ -203,12 +201,12 @@ def detect(confirmed_6s=False, allow_unidentified=False, check_kernel=True, conf
         raise RuntimeError(message)
     chip, chip_source = '', ''
     if board:
+        # Revision is only a fallback: A4111 rev B with RTL8852BE exists.
+        # An enumerated supported PCI ID takes precedence.
         expected = ('rtl8852' if board == '6s' or revision == 'D'
                     else 'ap6275p' if revision in ('A', 'B', 'C') else '')
-        if actual_chip and expected and actual_chip != expected:
-            raise RuntimeError('PCI 无线芯片与机型/CPU 修订号不匹配，拒绝选择修复包')
-        chip = expected or actual_chip
-        chip_source = ('board' if board == '6s' else 'soc_revision') if expected else 'pci'
+        chip = actual_chip or expected
+        chip_source = 'pci' if actual_chip else ('board' if board == '6s' else 'soc_revision')
         if not chip:
             raise RuntimeError('无法确定 4 Pro 无线版本：需要 PCI ID 或 S905X4 rev A/B/C/D')
         key = payload_key(branch, board, chip)

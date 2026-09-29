@@ -47,13 +47,23 @@ class DeviceIdentityTests(unittest.TestCase):
     def test_6s_chip_does_not_depend_on_revision(self):
         self.assertEqual(self.detect(revision='A')['chip'], 'rtl8852')
 
-    def test_pci_contradiction_refused(self):
-        with self.assertRaisesRegex(RuntimeError, 'PCI'):
-            self.detect(board='4pro', revision='C', pci='rtl8852')
-        with self.assertRaisesRegex(RuntimeError, 'PCI'):
+    def test_known_pci_overrides_4pro_revision_in_both_branches(self):
+        for branch in ('ng', 'no'):
+            for revision in ('A', 'B', 'C', 'D', ''):
+                for chip in ('rtl8852', 'ap6275p'):
+                    with self.subTest(branch=branch, revision=revision, chip=chip):
+                        result = self.detect(branch, '4pro', revision, chip,
+                                             confirmed_board='4pro')
+                        self.assertEqual(result['payload'], branch+'/4pro/'+chip)
+                        self.assertEqual(result['chip_source'], 'pci')
+
+    def test_6s_uses_pci_without_inventing_unsupported_variant(self):
+        result = self.detect(pci='rtl8852')
+        self.assertEqual(result['chip_source'], 'pci')
+        with self.assertRaisesRegex(RuntimeError, '6S 机型与无线芯片不匹配'):
             self.detect(pci='ap6275p')
 
-    def test_pci_fallback_only_for_unknown_revision(self):
+    def test_unknown_revision_requires_known_pci(self):
         self.assertEqual(self.detect(board='4pro', revision='', pci='ap6275p')['chip_source'], 'pci')
         with self.assertRaisesRegex(RuntimeError, '无法确定'):
             self.detect(board='4pro', revision='')
@@ -107,7 +117,29 @@ class DeviceIdentityTests(unittest.TestCase):
         for revision in 'ABC':
             with self.assertRaises(RuntimeError):self.detect(board='4pro', revision=revision, confirmed_board='6s')
         with self.assertRaises(RuntimeError):self.detect(board='6s', confirmed_board='4pro')
-        with self.assertRaises(RuntimeError):self.detect(board='4pro', revision='D', pci='ap6275p', allow_unidentified=True)
+        result = self.detect(board='4pro', revision='D', pci='ap6275p', allow_unidentified=True)
+        self.assertTrue(result['model_choice_required'])
+        self.assertEqual(result['board'], '')
+
+    def test_pci_does_not_prove_board_when_android_unavailable(self):
+        result = self.detect(board=device.AndroidIdentityUnavailable('unreadable'),
+                             pci='rtl8852', allow_unidentified=True)
+        self.assertEqual(result['board'], '')
+        self.assertEqual(result['payload'], '')
+        self.assertTrue(result['confirmation_required'])
+
+    def test_pci_ids_are_read_without_a_loaded_driver(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            endpoint = root/'0000:01:00.0'
+            endpoint.mkdir()
+            with patch.object(device, 'PCI', root):
+                for vendor, ident, chip in [('0x10ec', '0xb852', 'rtl8852'),
+                                            ('0x14e4', '0x449d', 'ap6275p'),
+                                            ('0x16c3', '0xabcd', '')]:
+                    (endpoint/'vendor').write_text(vendor)
+                    (endpoint/'device').write_text(ident)
+                    self.assertEqual(device.pci_chip(), chip)
 
     def test_runtime_lighting_uses_installed_variant_only(self):
         for selected in ('4pro', '6s'):

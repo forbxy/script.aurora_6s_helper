@@ -17,8 +17,11 @@ payload/
 └── hashes.json             # 相对于 payload 的完整文件路径与 SHA256
 ```
 
-安装器按分支、机型、芯片选择对应目录。A4111 rev A/B/C 使用 AP6275P，rev D 使用 RTL8852；
-A4112 使用 6S RTL8852 包。优先使用原厂 Android 型号，PCIe 芯片 ID 用于交叉核对。
+安装器按分支、机型、芯片选择对应目录。优先使用原厂 Android 型号区分机型，
+A4111 / rev D 保留实物机型选择；当前 DTB 名称不能证明实物机型。
+无线芯片优先采用已识别的 PCI ID（包括 rev B 配 RTL8852 的 4 Pro）；未识别到已知
+PCI 芯片时，4 Pro 才按 CPU 修订号推测：rev A/B/C 为 AP6275P，rev D 为 RTL8852。
+A4112 使用 6S 包，仅提供 RTL8852 组合，不将实际博通芯片当作 RTL8852 部署。
 无原厂机型时支持手动确认机型；未知 CPU 修订且无可用 PCI ID 时，不猜测 4 Pro 的无线版本。
 
 NG 与 NO 各 RTL8852 包的蓝牙配置分别存放，当前内容相同。发布前应同步更新 `hashes.json`。
