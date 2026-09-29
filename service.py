@@ -2,6 +2,7 @@ import fcntl
 import json
 from pathlib import Path
 import sys
+import threading
 import time
 
 import xbmc
@@ -12,6 +13,7 @@ from config import ADDON_ID, load_profile, migrate_colors
 from effects import encode, levels, software_frame, smooth_levels
 from hardware import Controller
 from diagnostics import exception_details
+from bluetooth_startup import recover_once
 
 
 class Monitor(xbmc.Monitor):
@@ -34,6 +36,11 @@ def main():
         xbmc.log('[Aurora6S] service already running', xbmc.LOGINFO)
         return
     monitor = Monitor()
+    bluetooth_thread = threading.Thread(
+        target=recover_once,
+        args=(monitor, lambda message: xbmc.log('[Aurora6S] Bluetooth: ' + message, xbmc.LOGINFO)),
+        name='aurora-bluetooth-startup', daemon=True)
+    bluetooth_thread.start()
     player = xbmc.Player()
     controller = Controller()
     current = None
