@@ -114,7 +114,7 @@ def validate_vendor_filesystem(source,extents):
     return expected
 
 
-def read_vendor_models(super_row):
+def read_vendor_models(super_row, *, slot=None):
     dev=Path('/dev/super')
     import os,stat
     if not stat.S_ISBLK(dev.stat().st_mode):raise ValueError('super is not a block device')
@@ -125,7 +125,10 @@ def read_vendor_models(super_row):
         p=subprocess.run(args,capture_output=True,encoding='utf-8',timeout=30)
         if p.returncode:raise ValueError('Android 机型读取失败：'+p.stderr.strip())
         return p.stdout.strip()
-    slot=parse_active_slot(run(['fw_printenv','active_slot']))
+    if slot is None:
+        slot=parse_active_slot(run(['fw_printenv','active_slot']))
+    elif slot not in (0,1):
+        raise ValueError('Invalid identity-only vendor slot')
     with dev.open('rb',buffering=0) as f:
         prefix=f.read(12288)
         maximum,slots,_=metadata_geometry(prefix)
@@ -145,5 +148,10 @@ def read_vendor_models(super_row):
             return sorted({line.split('=',1)[1].strip() for line in text.splitlines()
                            if re.match(r'^ro\.product\.(?:[\w]+\.)?model=',line)})
         finally:
-            if mounted:run(['umount',tmp])
-            if created:run(['dmsetup','remove','--retry',name])
+            try:
+                if mounted:run(['umount',tmp])
+                if created:run(['dmsetup','remove','--retry',name])
+            except Exception as exc:
+                # A repair identity probe must never swallow failed cleanup and
+                # continue to another mapping or a write operation.
+                raise RuntimeError('Android identity mapping cleanup failed') from exc

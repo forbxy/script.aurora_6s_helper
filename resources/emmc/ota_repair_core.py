@@ -7,6 +7,26 @@ from layout_trial import fdt
 sha=lambda data:hashlib.sha256(data).hexdigest()
 FIELDS=('index','name','offset','size','flags')
 def geometry(rows):return [[p[k] for k in FIELDS] for p in rows]
+def android_state(raw):
+    """Describe opaque state for preservation, never select or repair a slot."""
+    if len(raw)!=65536:raise ValueError('Short misc read')
+    b=raw[2048:2080]
+    valid=(struct.unpack_from('<I',b,4)[0]==0x42414342 and b[8]==1 and
+           b[9]&7==2 and zlib.crc32(b[:28])==struct.unpack_from('<I',b,28)[0])
+    suffix=b[:4].rstrip(b'\0')
+    recorded=suffix.decode('ascii') if valid and suffix in (b'_a',b'_b') else None
+    v=raw[32768:32832]
+    vab=(v[5] if v[0]==2 and struct.unpack_from('<I',v,1)[0]==0x56740ab0 else
+         0 if not any(v) else None)
+    warnings=[]
+    if any(raw[:2048]):warnings.append('Android 存在待处理的 Recovery/启动请求，修复会原样保留；若启动后提示清空数据，请先不要确认。')
+    if vab!=0:warnings.append('Android OTA 状态尚未确认空闲，修复不处理升级、合并或回滚。')
+    if not recorded:warnings.append('Android A/B 元数据不能明确解析；仅保留，不指定启动槽位。')
+    return {'misc_sha256':sha(raw),'ab_metadata_valid':valid,
+            'recorded_suffix':recorded,'virtual_ab_status':vab,
+            'pending_boot_message':bool(any(raw[:2048])), 'warnings':warnings,
+            'policy':'preserve-only; no boot slot selected'}
+
 def select_slot(raw):
     if len(raw)!=65536:raise ValueError('Short misc read')
     # Do not silently override pending recovery / update requests.
@@ -35,7 +55,7 @@ def select_slot(raw):
             raise ValueError('Virtual A/B merge state is active or unsupported')
     return {'selected':suffix,'slots':slots,'misc_sha256':sha(raw)}
 
-def check_environment(env):
+def check_environment(env, allow_short=False):
     """Check supported boot scripts without deriving any environment writes."""
     if env.get('active_slot') not in ('normal','_a','_b'):
         raise ValueError('Unrecognized persisted active_slot')
@@ -43,7 +63,7 @@ def check_environment(env):
     # persisted values may be defaults/stale and are never changed by recovery.
     policy.environment_change(dict(env,active_slot='_a'),'install')
     count,_=policy.scanner(env['cfgloademmc'])
-    if count<29:
+    if count<29 and not allow_short:
         raise ValueError('Existing cfgloademmc does not cover CE partition 29; layout-only repair cannot change it')
 
 

@@ -1,5 +1,6 @@
 """User-initiated eMMC management; the lighting service never installs/restores."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -9,7 +10,7 @@ import xbmcgui
 from diagnostics import user_message
 
 WORKER=Path(__file__).resolve().parents[1]/'emmc/worker.py'
-TITLES={'install':'安装 Android / CE 双系统','remove':'移除 eMMC 中的 CE','backup':'完整备份 eMMC','restore':'从完整备份还原 eMMC','repair':'修复 OTA 后的双系统布局（NO）'}
+TITLES={'install':'安装 Android / CE 双系统','remove':'移除 eMMC 中的 CE','backup':'完整备份 eMMC','restore':'从完整备份还原 eMMC','repair':'修复双系统启动/布局'}
 OPERATION_NOTICE='操作期间请勿取消、断电、拔盘、退出 Kodi 或进行任何其他操作，请等待完成。'
 
 
@@ -117,13 +118,45 @@ def main():
         warning='将完整备份 eMMC 用户区和 boot0/boot1，并读回校验。不会修改 eMMC，也不需要重启。备份不包含 RPMB/eFuse，不是线刷包。需保持供电和外置盘连接。'
         button='开始备份'
     elif action=='repair':
-        rows=report['ota_repair']['partitions'];boot,data,android=rows[-3:]
-        warning=('适用于 Android OTA 后分区表回到原厂布局，但原 CE 文件系统仍完整的情况。将按现场数据恢复分区映射，不依赖旧安装记录。\n'
-            '只写 DTB/MPT，不格式化、不主动重置 Android，不修改启动环境或 A/B 槽位。不能保证已损坏的数据可恢复，也不解决再次 OTA 的兼容性。\n'
+        repair=report['ota_repair']
+        layout_needed=repair['layout_needed'];boot_needed=bool(repair['environment_changes'])
+        resume=repair.get('ota_resume',{'state':'none'});retry=resume['state']=='ready'
+        if not layout_needed and not boot_needed and not retry:
+            dialog.ok(TITLES[action],'双系统分区布局和启动扫描范围正常，无需修改。未写入 eMMC；尚未验证实际开机或全部系统文件。'+('\nOTA：'+resume['reason'] if resume.get('reason') else ''))
+            return
+        boot,data,android=repair['partitions'][-3:]
+        changes=[]
+        if layout_needed:changes.append('恢复双系统分区布局（DTB/MPT）')
+        if boot_needed:changes.append('修复内置 CE 启动扫描范围（cfgloademmc）')
+        if retry:
+            if layout_needed and not resume.get('preserve_target'):
+                changes.append('第一阶段：处理已确认的 Recovery 请求，重启后再核对 OTA 目标槽')
+            elif resume.get('preserve_target'):
+                changes.append('清除已确认的 Recovery 请求，保留 Android 已标记成功的目标槽 '+resume['target'])
+            else:
+                changes.append('恢复 OTA 目标槽 '+resume['target']+' 的优先级和有限启动次数')
+        scope=('不格式化、不重置 Android。先完整读取现场快照；不需要 update.zip 或安装记录。\n'
+               '仅处理已确认的 init_user0_failed Recovery 命令。'+
+               ('本次完全保留 A/B 信息，不补充尝试次数，无需第二阶段修复。' if resume.get('preserve_target') else
+                '本阶段不改 A/B；重启到外置 CE 后，需再次运行本功能恢复目标槽。' if layout_needed else
+                '会更新 misc 内的目标槽优先级、6 次尝试及 CRC；保留来源槽，不提前标记成功。不修改 active_slot 环境变量或快照内容。')) if retry else (
+               '写入前只读核对 CE 文件系统和启动文件。不格式化、不主动重置 Android，不修改 A/B 槽位或 misc。')
+        scope+='\n若 CE 数据分区有未回放的 ext4 日志，将保存撤销记录并仅回放日志，再完整只读检查；检查失败则停止。撤销记录不等于完整备份，也不能保证断电恢复。'
+        warning=('本次检测需要：'+'；'.join(changes)+'。\n'+scope+'\n'
             'CE 启动区 %.2f GiB，CE 数据区 %.2f GiB，Android 用户区 %.2f GiB。\n'
-            '本操作不做整盘备份，仅保存修复前的分区元数据、env 和 misc。可能造成数据丢失或无法启动，插件作者不对修复造成的任何损失负责。\n'
-            '完成后必须保留外置启动盘重启检查；重启前不要安装、卸载或再次修复。') % (boot['size']/1024**3,data['size']/1024**3,android['size']/1024**3)
-        button='同意并修复布局'
+            '不做整盘备份，仅保存本次修改前的启动元数据；OTA 恢复另外保存 metadata 和 super 映射记录。'
+            'Android 后续合并不可用这些记录单独回滚。可能造成数据丢失或无法启动，插件作者不对修复造成的任何损失负责。\n') % (boot['size']/1024**3,data['size']/1024**3,android['size']/1024**3)
+        if retry and resume.get('preserve_target'):
+            warning+='完成后正常关机，关机后拔掉 U 盘/SD 卡，再开机验证内置 CE，不要按 AV 复位键。随后从内置 CE 菜单选择“从内部存储启动”进入 Android，等待验证及快照合并；不要再次检查更新或恢复出厂。'
+        elif retry:
+            warning+=('完成后保留 U 盘正常重启到外置 CE，再运行本功能；不要进入旧 Android。' if layout_needed else
+                      '完成后从 CE 菜单选择“从内部存储启动”进入 Android，等待其验证及合并；不要再检查更新或恢复出厂。')
+        else:
+            warning+='完成后正常关机，关机后拔掉 U 盘/SD 卡，再开机验证内置 CE，不要按 AV 复位键；关机前不要继续安装、移除或修复。'
+            for note in repair.get('android_state',{}).get('warnings',[]):warning+='\n'+note
+            if resume.get('reason'):warning+='\nOTA 目标槽不会修改：'+resume['reason']
+        warning+='\n修复不保证 Android 一定能启动或完成 OTA。不会自动重启。'
+        button='同意并修复'
     elif action=='restore':
         warning=('将用所选备份覆盖当前 CE、Android、用户数据和 boot0/boot1，当前数据不会保留；仅恢复备份时的内容，不保证恢复加密数据。\n'
             '安装/移除双系统会重置 Android。插件作者不对刷双系统或备份还原造成的任何损失负责。\n'
@@ -136,11 +169,13 @@ def main():
         if action=='install':warning+='\nAndroid 用户数据 %d GiB（不含系统分区）；CE 启动区 1 GiB，CE 数据区约 %.2f GiB。容量已扣除分区间隔。' % (android_gib,report['ce_storage_bytes']/1024**3)
         button='同意并'+('安装' if action=='install' else '移除')
     from_ng = any(str(report['os_release'].get(k,'')).startswith('Amlogic-ng') for k in ('DISTRO_DEVICE','COREELEC_DEVICE','COREELEC_ARCH','LIBREELEC_ARCH'))
-    if from_ng:warning+='\nNG 双系统支持为测试功能，尚未完成内置启动验证。'
+    if from_ng and action in ('install','remove'):warning+='\nNG 双系统支持为测试功能。'
     warning+='\n开始前请先停止播放、媒体库同步、扫描和刮削。\n'+OPERATION_NOTICE
     if not dialog.yesno(TITLES[action],summary+warning,nolabel='取消',yeslabel=button):return
     args=['submit',action]
-    if action=='repair':args+=['--accept-risk']
+    if action=='repair':
+        digest=hashlib.sha256(json.dumps(report['ota_repair'],sort_keys=True).encode('utf-8')).hexdigest()
+        args+=['--accept-risk','--repair-digest',digest]
     elif action!='backup':args+=['--reset-android','--accept-risk']
     if backup:args+=['--backup',backup]
     if android_gib is not None:args+=['--android-gib',str(android_gib)]

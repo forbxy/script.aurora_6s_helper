@@ -82,7 +82,8 @@ def target_idle(report, all_parts=False):
 
 def assess(action=None, backup=None, android_gib=None):
     if android_gib is not None and action != 'install':raise ValueError('只有安装操作可选择 Android 容量')
-    report = probe(); policy.identity(report)
+    report = probe(repair_identity=True) if action == 'repair' else probe()
+    policy.identity(report)
     layout, stock, dual = policy.layouts(report)
     report['layout'] = layout
     with open(DISK,'rb',buffering=0) as f:regions = read_regions(f.fileno())
@@ -101,8 +102,8 @@ def assess(action=None, backup=None, android_gib=None):
                 if not shutil.which(tool):raise ValueError('缺少工具：'+tool)
             if list(Path('/storage/.update').glob('*')):raise ValueError('请先完成或移走待安装的 CE 更新包')
         if action == 'repair':
-            import ota_repair
-            ota_repair.assess(report)
+            import dual_repair
+            dual_repair.assess(report)
         if action == 'restore':
             if not backup:raise ValueError('未选择备份')
             folder = private_external(backup);inspect(folder)

@@ -44,16 +44,33 @@ class RecoveryUITests(unittest.TestCase):
         from unittest.mock import MagicMock
         for accepted in (False,True):
             ui=self.load_ui();dialog=MagicMock();dialog.select.return_value=list(ui.TITLES).index('repair');dialog.yesno.return_value=accepted
-            progress=MagicMock();report={'android_models':['A4111'],'emmc_bytes':64*1024**3,'os_release':{'DISTRO_DEVICE':'Amlogic-no'},'ota_repair':{'partitions':[{'size':1024**3},{'size':40*1024**3},{'size':12*1024**3}]}}
+            progress=MagicMock();report={'android_models':['A4111'],'emmc_bytes':64*1024**3,'os_release':{'DISTRO_DEVICE':'Amlogic-no'},'ota_repair':{'layout_needed':True,'environment_changes':{},'partitions':[{'size':1024**3},{'size':40*1024**3},{'size':12*1024**3}]}}
             result={'job':'test','runtime':'test'}
             with patch.object(ui.xbmcgui,'Dialog',return_value=dialog,create=True),patch.object(ui.xbmcgui,'DialogProgress',return_value=progress,create=True),patch.object(ui,'call',side_effect=[report,result]) as call,patch.object(ui,'run_foreground') as foreground:
                 ui.main()
-                self.assertIn('不主动重置 Android',dialog.yesno.call_args.args[1]);self.assertIn('不修改启动环境或 A/B 槽位',dialog.yesno.call_args.args[1])
+                self.assertIn('不主动重置 Android',dialog.yesno.call_args.args[1]);self.assertIn('不修改 A/B 槽位或 misc',dialog.yesno.call_args.args[1])
                 self.assertIn(ui.OPERATION_NOTICE,dialog.yesno.call_args.args[1])
                 if accepted:
-                    self.assertEqual(call.call_args.args,('submit','repair','--accept-risk'));foreground.assert_called_once_with(result,ui.TITLES['repair'])
+                    self.assertEqual(call.call_args.args[:4],('submit','repair','--accept-risk','--repair-digest'));self.assertEqual(len(call.call_args.args[4]),64);foreground.assert_called_once_with(result,ui.TITLES['repair'])
                 else:
                     self.assertEqual(call.call_count,1);foreground.assert_not_called()
+
+    def test_boot_only_and_healthy_ui(self):
+        from unittest.mock import MagicMock
+        for changes in ({}, {'cfgloademmc':'reviewed-script'}):
+            ui=self.load_ui();dialog=MagicMock();dialog.select.return_value=list(ui.TITLES).index('repair');dialog.yesno.return_value=True
+            report={'android_models':['A4111'],'emmc_bytes':64*1024**3,'os_release':{'DISTRO_DEVICE':'Amlogic-ng'},
+                    'ota_repair':{'layout_needed':False,'environment_changes':changes,'partitions':[{'size':1024**3},{'size':40*1024**3},{'size':12*1024**3}]}}
+            result={'job':'test','runtime':'test'}
+            with patch.object(ui.xbmcgui,'Dialog',return_value=dialog,create=True),patch.object(ui.xbmcgui,'DialogProgress',return_value=MagicMock(),create=True),patch.object(ui,'call',side_effect=[report,result]) as call,patch.object(ui,'run_foreground') as foreground:
+                ui.main()
+                if changes:
+                    text=dialog.yesno.call_args.args[1]
+                    self.assertIn('cfgloademmc',text);self.assertNotIn('恢复双系统分区布局（DTB/MPT）',text)
+                    foreground.assert_called_once()
+                else:
+                    dialog.yesno.assert_not_called();foreground.assert_not_called();self.assertEqual(call.call_count,1)
+                    self.assertIn('无需修改',dialog.ok.call_args.args[1])
 
     def test_status_menu_index_after_new_action(self):
         from unittest.mock import MagicMock

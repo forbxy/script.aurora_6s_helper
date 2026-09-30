@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'resources/emmc'))
 import ota_repair as repair
+import dual_repair
 import ota_repair_core as core
 import operations as op
 import policy,worker
@@ -76,7 +77,7 @@ class RecoveryTests(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,'misc'):repair.verify_preserved(f.fileno(),r,plan)
  def test_worker_repair_never_calls_install_remove_or_backup(self):
   with tempfile.TemporaryDirectory() as tmp:
-   root=Path(tmp);job=root/'job';job.mkdir();r=report()
+   root=Path(tmp);job=root/'job';job.mkdir();r=report();r['ota_repair']={}
    (job/'request.json').write_text(json.dumps(dict(action='repair',reset_accepted=False,risk_accepted=True,report=r,source_backup=None,boot_id='testboot')))
    (job/'status.json').write_text(json.dumps(dict(phase='queued',boot_id='testboot',device_writes_started=False)))
    realopen=open
@@ -86,14 +87,57 @@ class RecoveryTests(unittest.TestCase):
    events=[]
    def recovery(folder,live,update):
     events.append(folder);update('repair-writing','test',device_writes_started=True)
+    return {'changed':True,'message':'test'}
    with contextlib.ExitStack() as stack:
     stack.enter_context(patch.object(worker,'private_external',return_value=job));stack.enter_context(patch.object(worker,'read',return_value='testboot'));stack.enter_context(patch('worker.open',side_effect=opened,create=True))
     stack.enter_context(patch.object(op,'assess',return_value=r));stack.enter_context(patch.object(op,'same_device'))
     for name in ('full_backup','zero_userdata','commit_metadata','change_environment','environment'):
      stack.enter_context(patch.object(op,name,side_effect=AssertionError('Unexpected '+name)))
-    stack.enter_context(patch.object(repair,'execute',side_effect=recovery))
+    stack.enter_context(patch.object(dual_repair,'execute',side_effect=recovery))
     worker.execute(job)
    self.assertEqual(events,[job]);state=json.loads((job/'status.json').read_text());self.assertEqual(state['phase'],'complete');self.assertTrue(state['reboot_required'])
+ def test_readonly_check_uses_open_device_not_mapper_alias(self):
+  from unittest.mock import MagicMock
+  import stat
+  for name in ('/dev/mapper/aurora-region-test','/dev/dm-3','/dev/loop7'):
+   opened=MagicMock();opened.__enter__.return_value.fileno.return_value=123
+   with patch.object(Path,'open',return_value=opened),patch.object(repair.os,'fstat',return_value=type('S',(),{'st_mode':stat.S_IFBLK})()),patch.object(repair.fcntl,'ioctl',return_value=struct.pack('I',1)) as ioctl,patch.object(repair,'read',side_effect=AssertionError('No sysfs alias lookup')):
+    repair.require_readonly(Path(name))
+    ioctl.assert_called_once_with(123,0x125e,b'\0'*4)
+ def test_readonly_check_rejects_writable_regular_or_ioctl_failure(self):
+  from unittest.mock import MagicMock
+  import stat
+  for mode,value,error in ((stat.S_IFBLK,0,None),(stat.S_IFREG,1,None),(stat.S_IFBLK,1,OSError('ioctl failed'))):
+   opened=MagicMock();opened.__enter__.return_value.fileno.return_value=123
+   with patch.object(Path,'open',return_value=opened),patch.object(repair.os,'fstat',return_value=type('S',(),{'st_mode':mode})()),patch.object(repair.fcntl,'ioctl',return_value=struct.pack('I',value),side_effect=error):
+    with self.assertRaises((ValueError,OSError)):repair.require_readonly(Path('/dev/mapper/test'))
+ def test_payload_checks_ignore_missing_stale_or_invalid_md5(self):
+  from types import SimpleNamespace
+  for md5 in (None,b'0'*32+b' old-file',b'not a checksum'):
+   with tempfile.TemporaryDirectory() as tmp,contextlib.ExitStack() as stack:
+    root=Path(tmp);boot=root/'boot';data=root/'data';boot.mkdir();data.mkdir()
+    (data/'.kodi').mkdir();(data/'.config').mkdir()
+    kernel=bytearray(64);kernel[56:60]=b'ARM\x64';struct.pack_into('<Q',kernel,16,64)
+    for name,raw in {'kernel.img':kernel,'SYSTEM':b'hsqs'+b'X'*60,'dtb.img':b'DTB','config.ini':('rootopt='+repair.ROOTOPT+'\n').encode(),'cfgload':b'reviewed script'}.items():(boot/name).write_bytes(raw)
+    if md5 is not None:
+     for name in ('kernel.img.md5','SYSTEM.md5'):(boot/name).write_bytes(md5)
+    rows=[dict(name=n) for n in ('ce_system','ce_storage','userdata')]
+    stack.enter_context(patch.object(op,'region_loop',side_effect=lambda *a,**k:contextlib.nullcontext(Path('/dev/mapper/test'))))
+    stack.enter_context(patch.object(repair,'require_readonly'))
+    stack.enter_context(patch.object(repair.shutil,'which',return_value='/sbin/fsck.fat'))
+    stack.enter_context(patch.object(repair,'run_fsck',return_value=SimpleNamespace(returncode=0,stdout=b'OK',stderr=b'')))
+    stack.enter_context(patch.object(repair,'mounted',side_effect=lambda row,r,fs:contextlib.nullcontext((boot if fs=='vfat' else data,None))))
+    validator=stack.enter_context(patch.object(repair,'validate_stock_cfgload'))
+    progress=[]
+    evidence=repair.filesystem_check({},rows,lambda *a,**k:progress.append(k),'repair-prepare')
+    self.assertEqual(evidence['boot_files']['kernel.img'],hashlib.sha256(kernel).hexdigest())
+    self.assertTrue(evidence['data']['kodi']);validator.assert_called_once_with(b'reviewed script')
+    self.assertFalse(any(':md5:' in str(p) for p in progress))
+    if md5 is not None:self.assertEqual((boot/'kernel.img.md5').read_bytes(),md5)
+    # Removing the sidecar check must not remove header validation.
+    (boot/'SYSTEM').write_bytes(b'broken')
+    with self.assertRaisesRegex(ValueError,'Invalid SYSTEM header'):
+     repair.filesystem_check({},rows,lambda *a,**k:None,'repair-prepare')
  def test_fsck_cancellation_cleans_child(self):
   class Cancel(Exception):pass
   from unittest.mock import MagicMock

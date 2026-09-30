@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CE-only job runner. No operation executes without an explicit UI/CLI action."""
 import argparse
+import hashlib
 import fcntl
 import json
 import os
@@ -61,9 +62,14 @@ def list_backups():
     return result
 
 
-def submit(action, backup=None, reset=False, risk=False, android_gib=None):
+def submit(action, backup=None, reset=False, risk=False, android_gib=None, repair_digest=None):
     policy.confirmation(action,reset,risk)
     report=op.assess(action,backup,android_gib)
+    if action=='repair':
+        evidence=report['ota_repair']
+        digest=hashlib.sha256(json.dumps(evidence,sort_keys=True).encode('utf-8')).hexdigest()
+        if (repair_digest is not None and repair_digest!=digest) or (evidence.get('ota_resume',{}).get('state')=='ready' and repair_digest is None):
+            raise ValueError('修复方案与确认界面不一致，请重新检查并确认；未写入 eMMC')
     if op.BASE.is_symlink():raise ValueError('任务目录不能是符号链接')
     op.BASE.mkdir(mode=0o700,exist_ok=True);private_external(op.BASE)
     with open('/run/aurora-emmc-submit.lock','a') as lock:
@@ -118,9 +124,11 @@ def execute(folder):
         update('preparing','核对操作条件',foreground_pid=os.getpid(),foreground_start=process_start(os.getpid()))
         live=op.assess(action,request['source_backup'],request.get('android_gib'));op.same_device(request['report'],live)
         if action=='repair':
-            import ota_repair
-            ota_repair.execute(folder,live,update)
-            update('complete','双系统布局修复完成，DTB/MPT 已读回验证，env/misc 保持不变。请保留外置启动盘重启后检查，再测试内置 CE 和 Android；暂勿再次 OTA。',reboot_required=True)
+            import dual_repair
+            if live['ota_repair']!=request['report']['ota_repair']:
+                raise ValueError('修复范围或启动环境已改变，请重新检查并确认')
+            result=dual_repair.execute(folder,live,update)
+            update('complete',result['message'],reboot_required=result['changed'])
             return
         if action in ('backup','restore'):
             sizes={'mmcblk0':live['emmc_bytes'],**live['boot_areas']}
@@ -194,12 +202,12 @@ def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser();sub=parser.add_subparsers(dest='command',required=True)
     a=sub.add_parser('probe');a.add_argument('--action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int)
-    a=sub.add_parser('submit');a.add_argument('action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int);a.add_argument('--reset-android',action='store_true');a.add_argument('--accept-risk',action='store_true')
+    a=sub.add_parser('submit');a.add_argument('action',choices=('install','remove','backup','restore','repair'));a.add_argument('--backup');a.add_argument('--android-gib',type=int);a.add_argument('--reset-android',action='store_true');a.add_argument('--accept-risk',action='store_true');a.add_argument('--repair-digest')
     a=sub.add_parser('run');a.add_argument('folder');a.add_argument('--parent-pid',type=int)
     sub.add_parser('status');sub.add_parser('backups');sub.add_parser('health')
     args=parser.parse_args()
     if args.command=='probe':result=op.assess(args.action,args.backup,args.android_gib)
-    elif args.command=='submit':result=submit(args.action,args.backup,args.reset_android,args.accept_risk,args.android_gib)
+    elif args.command=='submit':result=submit(args.action,args.backup,args.reset_android,args.accept_risk,args.android_gib,args.repair_digest)
     elif args.command=='run':
         if args.parent_pid:
             # This child belongs to the foreground Kodi process, not a daemon.

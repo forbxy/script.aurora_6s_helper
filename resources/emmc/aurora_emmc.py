@@ -84,7 +84,7 @@ def props(path):
                 if '=' in line and not line.startswith('#'))
 
 
-def probe():
+def probe(*, repair_identity=False):
     if os.geteuid() != 0:
         raise ValueError('Run probe as root on CoreELEC')
     os_release = {k: v.strip('"') for k, v in props('/etc/os-release').items()}
@@ -118,7 +118,13 @@ def probe():
                 android_model.append(v)
     from platform_support import branch
     detected_branch = branch(os_release)
-    if not android_model and detected_branch == 'Amlogic-ng':
+    identity_evidence = None
+    if repair_identity:
+        from repair_identity import read_models
+        super_rows = [p for p in table['partitions'] if p['name']=='super' and p['sysfs_matches']]
+        if len(super_rows)!=1:raise ValueError('Cannot verify original super partition')
+        android_model, identity_evidence = read_models(super_rows[0])
+    elif not android_model and detected_branch == 'Amlogic-ng':
         from android_identity import read_vendor_models
         super_rows = [p for p in table['partitions'] if p['name']=='super' and p['sysfs_matches']]
         if len(super_rows)!=1:raise ValueError('Cannot verify original super partition')
@@ -144,6 +150,8 @@ def probe():
                   mounts=roots, storage_free_bytes=fs.f_bavail*fs.f_frsize,
                   boot_areas=boot_areas, tools=tools, boot_environment=env,
                   android_data_fstab=crypto_fstab, dm_targets=command('dmsetup','targets'))
+    if identity_evidence is not None:
+        result['repair_identity'] = identity_evidence
     result['blockers'] = []
     if result['android_models'] not in (['A4111'], ['A4112']):
         result['blockers'].append('Original Android model is not unambiguously A4111/A4112')

@@ -86,3 +86,75 @@ The explicit `repair` action uses `ota_repair.py` / `ota_repair_core.py`, adapte
 Only the Android DTB pair and MPT are written. All environment variables and misc remain unchanged; full env/misc hashes are checked before/after. Small original metadata artifacts and a schema-2 layout-only plan are retained in the job's `layout-repair` subdirectory. Existing worker locks and lifecycle apply, cancellation is allowed only before the first write, and interrupted writes require manual recovery review. Old standalone plans cannot be submitted via the UI. Reboot to external CE before any further disk operation, then separately test internal CE and Android. This does not establish Android OTA compatibility.
 
 The UI displays filesystem check phases without invented byte progress; boot-file hashing and metadata write/readback have byte accounting. The standalone hardware validation does not replace end-to-end testing of the integrated plugin flow.
+
+
+## Slot-independent boot/layout repair (1.6.13)
+
+Only `probe --action repair` uses identity-only reads of both vendor metadata slots.
+Each usable vendor must pass existing LP checksums, bounds and ext4-size checks;
+readable model properties must agree on A4111 or A4112. A structurally invalid or
+unreadable vendor is recorded, never enlarged; conflicting/unknown models and
+mapping-cleanup failures stop the operation. This does not select Android's boot
+slot. Install, remove, backup and restore retain their existing identity path.
+
+The combined NG/NO repair records misc (including pending BCB and Virtual A/B) as
+opaque state to preserve. It does not require an idle Android OTA or overwrite
+active_slot, boot_part, recovery_part, misc or userdata. Warnings are shown before
+confirmation. Full read-only CE filesystem/payload checks still precede writes.
+The strict legacy layout-only entry point retains its earlier slot checks; only
+the explicit combined repair context enables this preservation policy.
+
+NG accesses the unchanged env range through a bounded raw dm-linear mapping,
+read-only for reads, so post-write partition-node invalidation does not require a
+reboot before checking/updating cfgloademmc. NO retains named env access. Both
+paths compare the entire decoded environment; cfgloademmc is the only permitted
+changed key. Raw DTB/MPT and full misc are checked after the write. Original
+DTB/MPT/env/misc are saved in the external job, without making a full backup.
+Reboot to external CE to verify layout, then test internal CE before Android.
+Pending Android recovery may still request a wipe; this repair does not authorize
+that action or guarantee Android can finish its OTA.
+
+
+## Guarded pending OTA target retry (1.6.14)
+
+The combined repair action now calls `ota_resume.py`. Its pure parsers in
+`ota_resume_core.py` validate Android 11 protobuf records, LP geometry/header/table
+checksums and extents, source/target agreement, A/B CRC and a successful source.
+`ota_snapshot.py` reads Linux persistent snapshot v1 exception tables in userspace;
+no kernel snapshot target or userdata mount/decryption is used. Only full coverage
+(no fallback to old origin blocks) for the five known dynamic partitions qualifies.
+All virtual bytes are read in the foreground before any repair write. Their hashes
+are change/evidence fingerprints, not an assertion of official image authenticity.
+
+The tested default Amlogic records (source successful 7/7; target unverified 7/7)
+can be promoted to target priority 15 / tries 6 / unsuccessful. The source record,
+recorded suffix, Virtual A/B message and snapshot state are preserved. Unknown or
+already-attempted target states are not replenished. This supports either direction
+when all evidence agrees; hardware validation so far is A-to-B on A4111/NG.
+Only the exact known init_user0_failed BCB command is clearable; other requests
+remain untouched. Writes cover the command sector and/or A/B sector with unchanged
+surrounding bytes, fsync and full 2 MiB misc readback. No success bit is forged.
+
+If geometry needs recovery, the first invocation only restores DTB/MPT/scanner and
+clears the eligible BCB command. The kernel partition view must match the repaired
+layout after reboot to external CE before a new invocation can activate the target.
+UI confirmation is bound by a digest to the submitted plan. Existing pinned runtime,
+boot-ID checks, task locks, rereads and cancellation rules remain in force. No new
+service or automatic reboot is installed. Other repair cases retain the original
+preserve-only policy. Install/remove/backup/restore paths do not call OTA retry.
+
+Original metadata is retained privately in the external job's `ota-resume` folder.
+It is not sufficient to undo a subsequent Android snapshot merge. NO uses the same
+validated on-disk formats and raw byte writes as NG, with the preexisting branch
+specific environment mapping. NO recovery has now been hardware tested on A4111: UI repair, target B boot,
+MergeCompleted, and a subsequent internal CE boot all passed.
+
+
+## Completed repair instructions (1.6.17)
+
+When the Android target is already marked successful, no second activation step is
+needed: shut down, remove external USB/SD, and verify internal CE boots normally
+without pressing AV reset. Then use CE's internal-storage boot action to start
+Android and finish snapshot merging. Ordinary completed boot/layout repairs use
+the same internal CE boot check. A layout-first repair with an unconfirmed target
+still requires rebooting external CE and a second guarded invocation.
