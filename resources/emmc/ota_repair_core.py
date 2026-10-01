@@ -59,9 +59,8 @@ def check_environment(env, allow_short=False):
     """Check supported boot scripts without deriving any environment writes."""
     if env.get('active_slot') not in ('normal','_a','_b'):
         raise ValueError('Unrecognized persisted active_slot')
-    # The common validator needs an A/B value. Normalize only this local copy;
-    # persisted values may be defaults/stale and are never changed by recovery.
-    policy.environment_change(dict(env,active_slot='_a'),'install')
+    # Validate the actual persisted value; normal is supported without guessing.
+    policy.environment_change(env,'install')
     count,_=policy.scanner(env['cfgloademmc'])
     if count<29 and not allow_short:
         raise ValueError('Existing cfgloademmc does not cover CE partition 29; layout-only repair cannot change it')

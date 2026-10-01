@@ -10,6 +10,21 @@ LEGACY_BOOT_ALLOWED = BOOT_REQUIRED | {'resolution.ini', 'dovi.ko', 'kernel.img.
 BOOT_EXCLUDES = ['device_trees', 'aml_autoscript']
 
 
+def required_boot_names(names):
+    """Resolve only kernel.img case-insensitively; keep actual source spelling."""
+    names = list(names)
+    kernels = [name for name in names if name.casefold() == 'kernel.img']
+    if len(kernels) > 1:
+        raise ValueError('启动文件名在 FAT32 上大小写冲突：' + ', '.join(kernels))
+    resolved = {name: name for name in BOOT_REQUIRED if name in names and name != 'kernel.img'}
+    if kernels:
+        resolved['kernel.img'] = kernels[0]
+    missing = BOOT_REQUIRED - resolved.keys()
+    if missing:
+        raise ValueError('缺少 CE 必需启动文件：' + ', '.join(sorted(missing)))
+    return resolved
+
+
 def relative_name(name):
     if (not isinstance(name, str) or not name or '\\' in name or '\0' in name
             or PurePosixPath(name).is_absolute() or any(x in ('', '.', '..') for x in name.split('/'))):
@@ -80,15 +95,18 @@ def boot_manifest_inventory(manifest):
     for name in directories:
         relative_name(name)
     if (len(set(names)) != len(names) or len(set(directories)) != len(directories)
-            or set(names) & set(directories) or not BOOT_REQUIRED <= set(names)):
+            or set(names) & set(directories)):
         raise ValueError('启动文件清单不完整或存在重复路径')
+    resolved = required_boot_names(names)
+    if len({name.casefold() for name in names + directories}) != len(names + directories):
+        raise ValueError('启动文件名在 FAT32 上大小写冲突')
     if manifest.get('schema') == 3:
         if manifest.get('boot_excludes') != BOOT_EXCLUDES or 'boot_directories' not in manifest:
             raise ValueError('启动文件排除规则不匹配')
         if any(name.split('/')[0] in BOOT_EXCLUDES for name in names + directories):
             raise ValueError('启动文件清单包含已排除文件或目录')
     elif manifest.get('schema') in (1, 2):
-        if directories or not set(names) <= LEGACY_BOOT_ALLOWED:
+        if directories or not {('kernel.img' if n == resolved['kernel.img'] else n) for n in names} <= LEGACY_BOOT_ALLOWED:
             raise ValueError('旧版启动文件清单不匹配')
     else:
         raise ValueError('未知启动文件清单版本')

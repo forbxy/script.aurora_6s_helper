@@ -1,12 +1,13 @@
-"""Read original Android identity only; no install policy or environment access."""
+"""Read original Android identity only; no install policy or environment writes."""
 import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 
 from aurora_emmc import MIB, parse_mpt
-from android_identity import read_vendor_models
+from repair_identity import read_models_for_environment
 
 
 def read_models():
@@ -25,7 +26,12 @@ def read_models():
         raise ValueError('Cannot identify original super partition')
     # This reader checks the live super device against the MPT, validates LP
     # checksums/extents and mounts only vendor as ro,noload, then cleans up.
-    return read_vendor_models(rows[0])
+    environment = subprocess.run(['fw_printenv', 'active_slot'], capture_output=True,
+                                 encoding='utf-8', timeout=30)
+    if environment.returncode:
+        raise ValueError('Android 启动环境读取失败：' + environment.stderr.strip())
+    models, _ = read_models_for_environment(rows[0], environment.stdout)
+    return models
 
 
 if __name__ == '__main__':

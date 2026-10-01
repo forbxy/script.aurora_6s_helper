@@ -13,7 +13,7 @@ import zlib
 
 from fat_boot import boot_source
 from aurora_emmc import probe, plan, read
-from boot_files import BOOT_REQUIRED, BOOT_EXCLUDES, scan_boot, check_boot_capacity
+from boot_files import BOOT_REQUIRED, BOOT_EXCLUDES, scan_boot, check_boot_capacity, required_boot_names
 
 
 def sha(path):
@@ -88,7 +88,7 @@ def source_inventory(root=Path('/flash'), partition_bytes=1024**3):
 
 def _source_inventory(root, partition_bytes):
     files, directories = scan_boot(root, exclude_device_trees=True)
-    if not BOOT_REQUIRED <= set(files):raise ValueError('缺少 CE 必需启动文件')
+    required_boot_names(files)
     stock = validate_stock_cfgload(STOCK_CFGLOAD.read_bytes())
     config = configure_rootopt((Path(root)/'config.ini').read_bytes())
     sizes = dict(files, cfgload=len(stock), **{'config.ini': len(config)})

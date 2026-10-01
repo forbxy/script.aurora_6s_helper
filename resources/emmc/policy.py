@@ -135,7 +135,9 @@ def scanner(value):
 def environment_change(env, action):
     if env.get('bootcmd') != BOOTCMD or env.get('bootfromemmc') != 'run cfgloademmc' or env.get('bootfromnand') != '0':
         raise ValueError('外置优先 / Android 启动选择逻辑与支持的环境不一致')
-    if env.get('active_slot') not in ('_a', '_b') or 'get_valid_slot' not in env.get('storeboot', '') or 'imgread kernel ${boot_part}' not in env.get('storeboot', ''):
+    # The vendor storeboot resolves the boot slot at runtime via get_valid_slot.
+    # Accept its persisted normal default; never select or rewrite a slot here.
+    if env.get('active_slot') not in ('normal', '_a', '_b') or 'get_valid_slot' not in env.get('storeboot', '') or 'imgread kernel ${boot_part}' not in env.get('storeboot', ''):
         raise ValueError('无法确认原厂 Android A/B 引导入口')
     _, source = scanner(env['cfgloademmc'])
     new = scan_through(29 if action == 'install' else 24)

@@ -180,3 +180,35 @@ question-mark names and passed production staging, source revalidation, copy and
 readback with Chinese filenames/directories and ext4 content. The real `/flash`
 read-only UTF-8 view was also checked; its original mount stayed unchanged.
 No physical eMMC format/write was performed. This run did not repeat on NG.
+
+
+## Persisted normal boot environment (1.8.2)
+
+NG identity probing previously required `active_slot=_a/_b`, and install/remove
+also rejected `normal` even though the supported vendor storeboot resolves the
+slot through `get_valid_slot` at boot. For the exact persisted value `normal`,
+NG now reads both bounded, read-only vendor identities using the same identity
+checks as repair. One unreadable slot may be ignored only if the readable model
+is unambiguously A4111/A4112; conflicting/unknown models and mapping cleanup
+failures stop the operation. Explicit `_a/_b` still reads only that slot and does
+not fall back. Unknown/missing environment values remain refused. The normal
+probe stores this evidence in `android_identity`; repair keeps `repair_identity`.
+
+Install/remove accept `normal` with the existing boot-script checks. They still
+write only cfgloademmc in the environment, preserve active_slot, and do not copy
+misc's recorded suffix into an environment variable or choose an Android slot.
+Partition, model, external-boot and write-boundary validation remain in force.
+
+The supplied A4111/NG report has a stock 29-partition layout, verified B vendor,
+B marked successful, idle Virtual A/B status and no pending boot message. Its A
+vendor mapping is shorter than the ext4 filesystem and is not expanded. Local
+regressions cover this identity case, ambiguous identities, cleanup failures,
+unknown slots, and install/remove environment write/readback preservation.
+
+### 1.8.3：硬件修复兼容 normal
+
+硬件修复的原厂机型读取入口复用同一套只读识别：`active_slot=normal` 时分别检查 A/B vendor，要求可读取的原厂机型唯一；明确为 `_a`/`_b` 时只读取指定槽。不会修改环境变量或选择 Android 启动槽。已有 Android 属性可直接读取时，仍优先使用这些属性。
+
+### 1.8.4：保留内核文件名大小写
+
+安装时忽略 `kernel.img` 的大小写识别必需内核文件；复制、清单和读回验证保留源文件实际名称（例如 `KERNEL.img`），不把 `KERNELce.img` 当成标准内核。源目录及清单中的大小写冲突仍拒绝。缺少启动文件时明确列出缺少的名称。`config.ini`、`cfgload` 的特殊处理及其他复制规则不变。

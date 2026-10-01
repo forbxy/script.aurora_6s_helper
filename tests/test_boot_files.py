@@ -54,6 +54,42 @@ class BootFilesTests(unittest.TestCase):
         bf.verify_boot_tree(dest,manifest)
         self.assertEqual(sum(r['bytes'] for r in manifest['boot_files']),sum(p.stat().st_size for p in boot.rglob('*') if p.is_file()))
 
+    def test_uppercase_kernel_keeps_name_through_staging_and_readback(self):
+        (self.source/'kernel.img').rename(self.source/'KERNEL.img')
+        (self.source/'KERNEL.img.md5').write_bytes(b'original sidecar')
+        (self.source/'KERNELce.img').write_bytes(b'other kernel')
+        manifest=self.stage()
+        ss.validate_boot(self.out,self.source)
+        names={row['file'] for row in manifest['boot_files']}
+        self.assertIn('KERNEL.img',names)
+        self.assertNotIn('kernel.img',names)
+        for name in ('KERNEL.img','KERNEL.img.md5','KERNELce.img'):
+            self.assertEqual((self.out/'boot'/name).read_bytes(),(self.source/name).read_bytes())
+        dest=self.root/'readback';shutil.copytree(self.out/'boot',dest)
+        bf.verify_boot_tree(dest,manifest)
+        (dest/'KERNEL.img').rename(dest/'kernel.img')
+        with self.assertRaises(ValueError):bf.verify_boot_tree(dest,manifest)
+
+    def test_kernel_matching_is_exact_except_case(self):
+        for name in ('KERNEL.img','KeRnEl.ImG','kernel.IMG'):
+            names=(bf.BOOT_REQUIRED-{'kernel.img'})|{name}
+            self.assertEqual(bf.required_boot_names(names)['kernel.img'],name)
+        for name in ('KERNELce.img','sub/kernel.img','kernel.img.bak'):
+            with self.subTest(name=name),self.assertRaisesRegex(ValueError,'kernel.img'):
+                bf.required_boot_names((bf.BOOT_REQUIRED-{'kernel.img'})|{name})
+        with self.assertRaisesRegex(ValueError,'大小写冲突'):
+            bf.required_boot_names(bf.BOOT_REQUIRED|{'KERNEL.img'})
+
+    def test_duplicate_kernel_source_and_manifest_refused(self):
+        (self.source/'KERNEL.img').write_bytes(b'duplicate')
+        with self.assertRaisesRegex(ValueError,'大小写冲突'):self.stage()
+        self.assertFalse((self.out/'boot').exists())
+        (self.source/'KERNEL.img').unlink()
+        manifest=self.stage()
+        row=dict(next(r for r in manifest['boot_files'] if r['file']=='kernel.img'),file='KERNEL.img')
+        manifest['boot_files'].append(row)
+        with self.assertRaisesRegex(ValueError,'大小写冲突'):bf.boot_manifest_inventory(manifest)
+
     def test_source_addition_after_staging_refused(self):
         self.stage();(self.source/'custom/new').write_bytes(b'new')
         with self.assertRaises(ValueError):ss.validate_boot(self.out,self.source)

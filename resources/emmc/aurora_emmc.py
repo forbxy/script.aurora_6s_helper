@@ -125,10 +125,13 @@ def probe(*, repair_identity=False):
         if len(super_rows)!=1:raise ValueError('Cannot verify original super partition')
         android_model, identity_evidence = read_models(super_rows[0])
     elif not android_model and detected_branch == 'Amlogic-ng':
-        from android_identity import read_vendor_models
+        from repair_identity import read_models_for_environment
         super_rows = [p for p in table['partitions'] if p['name']=='super' and p['sysfs_matches']]
         if len(super_rows)!=1:raise ValueError('Cannot verify original super partition')
-        android_model = read_vendor_models(super_rows[0])
+        slot_env = command('fw_printenv', 'active_slot')
+        if slot_env['returncode']:
+            raise ValueError('Android 启动环境读取失败：'+slot_env['stderr'])
+        android_model, identity_evidence = read_models_for_environment(super_rows[0], slot_env['stdout'])
     fs = os.statvfs('/storage')
     tools = {x: shutil.which(x) for x in ('python3', 'fw_printenv', 'fw_setenv', 'mkfs.vfat',
              'mkfs.ext4', 'rsync', 'sha256sum', 'e2fsck', 'resize2fs', 'dmsetup', 'ampart')}
@@ -151,7 +154,7 @@ def probe(*, repair_identity=False):
                   boot_areas=boot_areas, tools=tools, boot_environment=env,
                   android_data_fstab=crypto_fstab, dm_targets=command('dmsetup','targets'))
     if identity_evidence is not None:
-        result['repair_identity'] = identity_evidence
+        result['repair_identity' if repair_identity else 'android_identity'] = identity_evidence
     result['blockers'] = []
     if result['android_models'] not in (['A4111'], ['A4112']):
         result['blockers'].append('Original Android model is not unambiguously A4111/A4112')
