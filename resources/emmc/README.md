@@ -44,7 +44,7 @@ Before unmounting Android for restore, stop the previously active `opentee_linux
 
 ## Sources
 
-Project backend adapted from CE_android/tools. ampart source is bundled under vendor/ampart (GPL-3.0), commit 1539ff2f6fa73ef78dfde3ac585fb9c93244e85e: https://github.com/7Ji/ampart . Static aarch64 executable is the previously CE-tested build; build provenance is recorded in provenance.json. Its only execution target is a fresh simulation image.
+Project backend adapted from CE_android/tools. ampart source and build files are bundled under vendor/ampart (GPL-3.0), alongside bin/ampart, LICENSE.ampart and provenance.json; source commit 1539ff2f6fa73ef78dfde3ac585fb9c93244e85e: https://github.com/7Ji/ampart . Static aarch64 executable is the previously CE-tested build; build provenance is recorded in provenance.json. Its only execution target is a fresh simulation image.
 
 AM9 comparison: https://github.com/dangerouslaser/ugoos-am9-pro-coreelec-emmc/blob/581ca4f7a441461b957d814cc9beb1a1cca6cfe5/ce-emmc-install.sh#L361-L393 . That installer tries partprobe and constructs nodes from sysfs; it can still require reboot if the kernel does not register them. This backend uses bounded mappings and retains MPT instead of copying its GPT/MPT-clearing strategy.
 
@@ -158,3 +158,25 @@ without pressing AV reset. Then use CE's internal-storage boot action to start
 Android and finish snapshot merging. Ordinary completed boot/layout repairs use
 the same internal CE boot check. A layout-first repair with an unconfirmed target
 still requires rebooting external CE and a second guarded invocation.
+
+
+## FAT32 filename migration (1.8.1)
+
+The source FAT may be mounted with `iocharset=iso8859-1`. Chinese long filenames
+then appear as literal question marks, causing rsync EINVAL on the target. Setting
+UTF-8 on the destination alone cannot recover names already lost at the source.
+`fat_boot.boot_source` creates an independent read-only loop-backed UTF-8 mount
+for source inventory, staging and source revalidation; it checks the source block
+identity and read-only state and leaves the live `/flash` mount unchanged.
+Both target copy and target readback mount vfat with `utf8=1`. ext4 is unchanged.
+Preflight checks FAT-invalid names, UTF-16 component length and case collisions.
+The existing device_trees/aml_autoscript exclusions and config.ini/cfgload handling
+are unchanged. New jobs freeze the shared module with the other runtime files;
+existing failed jobs are not rewritten or automatically retried.
+
+Validation: 241 local tests passed with 4 skips. On 192.168.50.80 running NO
+22.0-Piers_nightly_20260924, disposable FAT32/ext4 loop images reproduced default
+question-mark names and passed production staging, source revalidation, copy and
+readback with Chinese filenames/directories and ext4 content. The real `/flash`
+read-only UTF-8 view was also checked; its original mount stayed unchanged.
+No physical eMMC format/write was performed. This run did not repeat on NG.

@@ -10,5 +10,8 @@
     "snapshot_format": "https://android.googlesource.com/platform/system/core/+/refs/heads/android11-release/fs_mgr/libsnapshot/snapshot.proto",
     "lp_format": "https://android.googlesource.com/platform/system/core/+/refs/heads/android11-release/fs_mgr/liblp/include/liblp/metadata_format.h",
     "implementation": "Local independent parsers and persistent dm-snapshot userspace reader; validated A4111/NG trial, 2026-09-30; no OTA image or device-specific identities embedded."
-  }
+  },
+  "ampart_release": "v1.4.1",
+  "ampart_download_url": "https://github.com/7Ji/ampart/releases/download/v1.4.1/ampart-v1.4.1-aarch64-static.gz",
+  "ampart_source_distribution": "Bundled in the addon ZIP under resources/emmc/vendor/ampart, including license and build files"
 }

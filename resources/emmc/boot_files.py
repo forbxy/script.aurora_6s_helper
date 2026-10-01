@@ -14,6 +14,16 @@ def relative_name(name):
     if (not isinstance(name, str) or not name or '\\' in name or '\0' in name
             or PurePosixPath(name).is_absolute() or any(x in ('', '.', '..') for x in name.split('/'))):
         raise ValueError('无效的启动文件相对路径：' + repr(name))
+    for part in name.split('/'):
+        if (any(ord(c) < 32 or c in '*?<>|":' for c in part)
+                or part.endswith((' ', '.'))):
+            raise ValueError('启动文件名不能写入 FAT32（可能存在乱码）：' + repr(name))
+        try:
+            length = len(part.encode('utf-16-le')) // 2
+        except UnicodeEncodeError:
+            raise ValueError('启动文件名编码无效：' + repr(name)) from None
+        if length > 255:
+            raise ValueError('启动文件名超过 FAT32 长度限制：' + repr(name))
     return name
 
 
@@ -25,11 +35,16 @@ def scan_boot(root, exclude_device_trees=False):
     files, directories = {}, []
 
     def visit(folder):
+        seen = set()
         for path in sorted(folder.iterdir()):
             name = path.relative_to(root).as_posix()
             if exclude_device_trees and name in BOOT_EXCLUDES:
                 continue
             relative_name(name)
+            folded = path.name.casefold()
+            if folded in seen:
+                raise ValueError('启动文件名在 FAT32 上大小写冲突：' + name)
+            seen.add(folded)
             info = path.lstat()
             if info.st_dev != device or path.is_mount():
                 raise ValueError('启动目录中存在额外挂载：' + str(path))

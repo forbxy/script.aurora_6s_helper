@@ -103,6 +103,35 @@ class BootFilesTests(unittest.TestCase):
         config.write_text('rootopt=wrong\n')
         with self.assertRaisesRegex(ValueError,'conflicts'):pb.source_inventory(self.source)
 
+    def test_invalid_fat_names_fail_before_any_boot_copy(self):
+        for name in ('????.m3u', 'bad:name', 'bad*name', 'trailing.', 'trailing ',
+                     'bad\x01name', 'x' * 256):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):bf.relative_name(name)
+        (self.source/'????.m3u').write_bytes(b'playlist')
+        with self.assertRaisesRegex(ValueError, 'FAT32'):self.stage()
+        self.assertFalse((self.out/'boot').exists())
+
+    def test_case_collision_fails_before_copy(self):
+        (self.source/'Custom').mkdir()
+        with self.assertRaisesRegex(ValueError, '大小写冲突'):self.stage()
+        self.assertFalse((self.out/'boot').exists())
+
+    def test_logical_source_paths_survive_private_utf8_view(self):
+        from contextlib import contextmanager
+        @contextmanager
+        def view(root):
+            self.assertEqual(Path(root),Path('/flash'))
+            yield self.source
+        with patch.object(pb, 'boot_source', view):
+            entries, dirs=pb.stage_files(Path('/flash'),self.out)
+        manifest=dict(schema=3,boot_strategy='stock-cfgload-config-rootopt',
+                      boot_files=entries,boot_directories=dirs,boot_excludes=bf.BOOT_EXCLUDES)
+        (self.out/'manifest.json').write_text(json.dumps(manifest))
+        row=next(r for r in entries if r['file']=='中文配置.txt')
+        self.assertEqual(row['source_path'],'/flash/中文配置.txt')
+        with patch.object(ss, 'boot_source', view):ss.validate_boot(self.out)
+
     def test_legacy_manifest_still_validates(self):
         for path in list(self.source.iterdir()):
             if path.name not in bf.BOOT_REQUIRED:

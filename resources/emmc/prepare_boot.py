@@ -11,6 +11,7 @@ import struct
 import uuid
 import zlib
 
+from fat_boot import boot_source
 from aurora_emmc import probe, plan, read
 from boot_files import BOOT_REQUIRED, BOOT_EXCLUDES, scan_boot, check_boot_capacity
 
@@ -81,6 +82,11 @@ def modify_cfgload(raw):
 
 
 def source_inventory(root=Path('/flash'), partition_bytes=1024**3):
+    with boot_source(root) as source:
+        return _source_inventory(source, partition_bytes)
+
+
+def _source_inventory(root, partition_bytes):
     files, directories = scan_boot(root, exclude_device_trees=True)
     if not BOOT_REQUIRED <= set(files):raise ValueError('缺少 CE 必需启动文件')
     stock = validate_stock_cfgload(STOCK_CFGLOAD.read_bytes())
@@ -92,8 +98,13 @@ def source_inventory(root=Path('/flash'), partition_bytes=1024**3):
 
 def stage_files(source, out):
     """Copy boot content except root device_trees/aml_autoscript; transform two files."""
+    with boot_source(source) as view:
+        return _stage_files(view, out, Path(source))
+
+
+def _stage_files(source, out, logical_source):
     source, out = Path(source), Path(out)
-    files, directories = source_inventory(source)
+    files, directories = _source_inventory(source, 1024**3)
     boot = out/'boot';boot.mkdir()
     for name in directories:(boot/name).mkdir()
     entries=[]
@@ -105,7 +116,7 @@ def stage_files(source, out):
             while chunk:=f.read(4*1024**2):target.write(chunk)
             target.flush();os.fsync(target.fileno())
         if before!=sha(boot/name) or before!=sha(src):raise RuntimeError('Source changed or copy hash mismatch')
-        entries.append(dict(file=name,source_path=str(src),source_sha256=before))
+        entries.append(dict(file=name,source_path=str(STOCK_CFGLOAD if name=='cfgload' else logical_source/name),source_sha256=before))
     if scan_boot(source, exclude_device_trees=True)!=(files,directories):
         raise ValueError('暂存期间启动文件清单发生变化')
     raw=(boot/'config.ini').read_bytes();(out/'original-config.ini').write_bytes(raw)

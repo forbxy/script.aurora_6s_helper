@@ -16,6 +16,7 @@ from inspect_storage import scan_tree,rsync_flags
 from live_snapshot import copy_live_storage,rsync_copy
 from file_attributes import attributes,copy_attributes,ignored_attribute_names,rsync_xattr_filters
 from prepare_boot import sha,modify_cfgload,configure_rootopt,validate_stock_cfgload,STOCK_CFGLOAD
+from fat_boot import boot_source, FAT_RW_OPTIONS, FAT_RO_OPTIONS
 from boot_files import boot_manifest_inventory, scan_boot, verify_boot_tree
 
 EXCLUDES=['/aurora-emmc-backups/','/aurora-emmc-staging/','/aurora-emmc-jobs/','/lost+found/',
@@ -30,6 +31,11 @@ def run(args,timeout=120):
 
 
 def validate_boot(stage, source_root=Path('/flash')):
+    with boot_source(source_root) as view:
+        return _validate_boot(stage, view, Path(source_root))
+
+
+def _validate_boot(stage, source_root, logical_source):
     stage=private_external(stage)
     manifest=json.loads((stage/'manifest.json').read_text());rows=manifest['boot_files']
     files,directories=boot_manifest_inventory(manifest)
@@ -42,7 +48,7 @@ def validate_boot(stage, source_root=Path('/flash')):
     if strategy not in (None,'stock-cfgload-config-rootopt'):raise ValueError('Unknown boot strategy')
     for row in rows:
         source=STOCK_CFGLOAD if strategy and row['file']=='cfgload' else Path(source_root)/row['file']
-        if strategy and row.get('source_path')!=str(source):raise ValueError('Unexpected boot source path')
+        if strategy and row.get('source_path')!=str(STOCK_CFGLOAD if strategy and row['file']=='cfgload' else logical_source/row['file']):raise ValueError('Unexpected boot source path')
         copy=stage/'boot'/row['file']
         if source.is_symlink() or copy.is_symlink() or not copy.is_file():raise ValueError('Unsafe boot file')
         if copy.stat().st_size!=row['bytes'] or sha(copy)!=row['sha256'] or sha(source)!=row['source_sha256']:
@@ -149,7 +155,7 @@ def copy_and_verify(snapshot_path,bootdev,datadev,update=None):
         try:
             boot=Path(tmp)/'boot';data=Path(tmp)/'storage';boot.mkdir();data.mkdir()
             for device,target,fs in [(bootdev,boot,'vfat'),(datadev,data,'ext4')]:
-                run(['mount','-t',fs,'-o','rw,noatime',str(device),str(target)]);mounts.append(target)
+                run(['mount','-t',fs,'-o',FAT_RW_OPTIONS if fs=='vfat' else 'rw,noatime',str(device),str(target)]);mounts.append(target)
             rsync_copy(['rsync','-rt','--modify-window=1',str(stage/'boot')+'/',str(boot)+'/'],update,'install-bootcopy',sum(r['bytes'] for r in manifest['boot_files']))
             flags=rsync_flags(run(['rsync','--version']),manifest['source_inventory'],metadata_fallback=True).replace('n','')
             rsync_copy(['rsync',flags,'--numeric-ids',*rsync_xattr_filters(flags),str(Path(snapshot_path)/'storage')+'/',str(data)+'/'],update,'install-datacopy',manifest['regular_file_bytes'])
@@ -158,7 +164,7 @@ def copy_and_verify(snapshot_path,bootdev,datadev,update=None):
             for target in reversed(mounts):run(['umount',str(target)])
             mounts=[]
             for device,target,fs in [(bootdev,boot,'vfat'),(datadev,data,'ext4')]:
-                run(['mount','-t',fs,'-o','ro',str(device),str(target)]);mounts.append(target)
+                run(['mount','-t',fs,'-o',FAT_RO_OPTIONS if fs=='vfat' else 'ro',str(device),str(target)]);mounts.append(target)
             verify_boot_tree(boot,json.loads((stage/'manifest.json').read_text()))
             checked=0
             for row in manifest['boot_files']:
