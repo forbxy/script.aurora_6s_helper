@@ -18,11 +18,14 @@ from bluetooth_startup import recover_once
 
 class Monitor(xbmc.Monitor):
     dirty = True
+    wake_generation = 0
 
     def onSettingsChanged(self):
         self.dirty = True
 
     def onNotification(self, sender, method, data):
+        if sender == "xbmc" and method == "System.OnWake":
+            self.wake_generation += 1
         if method.startswith('Player.') or (sender == ADDON_ID and method == 'Other.aurora.apply'):
             self.dirty = True
 
@@ -49,21 +52,28 @@ def main():
     values = (0, 0, 0)
     last_error = None
     retry_at = 0
+    handled_wake = 0
     status = Path('/run/aurora6s-led-status.json')
     try:
         migrate_colors()
         while not monitor.abortRequested():
             playing = player.isPlaying()  # remains true while paused
-            if monitor.dirty or current is None or playing != (current['name'] == 'playback'):
+            wake_generation = monitor.wake_generation
+            waking = wake_generation != handled_wake
+            if monitor.dirty or waking or current is None or playing != (current['name'] == 'playback'):
                 monitor.dirty = False
+                # Failed wake writes use the existing timed retry.
+                handled_wake = wake_generation
                 try:
                     profile = load_profile(playing)
-                    if profile != current or last_error:
+                    if profile != current or last_error or waking:
                         if not profile['enabled']:
                             controller.close()
                             software = False
                             backend = 'disabled'
                         else:
+                            if waking:
+                                controller.resume()
                             values = (0, 0, 0) if profile['mode'] == 'off' else levels(profile['rgb'], profile['brightness'])
                             breathing = profile['mode'] == 'breathing'
                             if breathing and profile.get('smooth', True):
@@ -78,6 +88,8 @@ def main():
                         last_error = None
                         status.write_text(json.dumps(dict(profile=profile, backend=backend), ensure_ascii=False), encoding='utf-8')
                         xbmc.log('[Aurora6S] applied ' + profile['name'] + ' / ' + backend, xbmc.LOGINFO)
+                        if waking:
+                            xbmc.log('[Aurora6S] lighting restored after wake / ' + backend, xbmc.LOGINFO)
                 except Exception as exc:
                     software = False
                     try:

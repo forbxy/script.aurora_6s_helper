@@ -42,12 +42,22 @@ def profile_targets(profile):
     return targets(profile['branch'], profile.get('board', '6s'), profile.get('chip', 'rtl8852'))
 
 
-def cleanup_targets(branch, chip):
+def cleanup_targets(branch, chip, version=8):
     """Only remove known previous Realtek deployment files, never whole directories."""
-    if (branch, chip) != ('ng', 'ap6275p'):
+    if chip != 'ap6275p':
         return {}
-    return {'cleanup/' + Path(name).name: target for name, target in NG.items()
-            if Path(name).name in ('8852be.ko', 'rtkm.ko', 'rtl8852bs_config', 'aurora6s-ng-wifi.service')}
+    result = ({'cleanup/' + Path(name).name: target for name, target in NG.items()
+               if Path(name).name in ('8852be.ko', 'rtkm.ko', 'rtl8852bs_config', 'aurora6s-ng-wifi.service')}
+              if branch == 'ng' else {})
+    # Formats 5..7 predate wake cleanup. Keep their exact restore allowlist.
+    if version >= 8:
+        result.update({
+            'cleanup/wake-service': str(SYSTEMD / 'aurora6s-wake.service'),
+            'cleanup/wake-enable': str(SYSTEMD / 'multi-user.target.wants/aurora6s-wake.service'),
+            'cleanup/wake-suspend': str(SYSTEMD / 'systemd-suspend.service.d/90-aurora6s-wake.conf'),
+            'cleanup/wake-old-ethernet': str(SYSTEMD / 'systemd-suspend.service.d/91-aurora-ethernet-repeat.conf'),
+        })
+    return result
 
 
 def desired_link(branch, chip, name):
@@ -60,7 +70,7 @@ def backup_targets(manifest):
     """Keep pre-layout backups restorable without trusting arbitrary paths."""
     branch = manifest['branch']
     version = manifest.get('format', 1)
-    if version in (4, 5):
+    if version in (4, 5, 6, 7, 8):
         return targets(branch, manifest['board'], manifest['chip'])
     if version == 3:
         saved = targets(branch, manifest['board'], manifest['chip'])
@@ -88,8 +98,8 @@ def links(branch):
     return {name: SYSTEMD / 'multi-user.target.wants' / name for name in UNITS}
 
 
-def run(*args, check=True):
-    return subprocess.run(args, check=check, capture_output=True, encoding='utf-8', timeout=30,
+def run(*args, check=True, timeout=30):
+    return subprocess.run(args, check=check, capture_output=True, encoding='utf-8', timeout=timeout,
                           env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
 
 
@@ -203,7 +213,7 @@ def restore(backup):
     manifest = json.loads((backup / 'manifest.json').read_text(encoding='utf-8'))
     branch = manifest['branch']
     saved_targets = backup_targets(manifest)
-    removed = cleanup_targets(branch, manifest['chip']) if manifest.get('format') == 5 else {}
+    removed = cleanup_targets(branch, manifest['chip'], manifest['format']) if manifest.get('format') in (5, 6, 7, 8) else {}
     if set(manifest.get('removed', {})) != set(removed):
         raise RuntimeError('清理备份清单不匹配')
     if set(manifest['files']) != set(saved_targets) or set(manifest['links']) != set(links(branch)):
@@ -214,9 +224,21 @@ def restore(backup):
     for name, saved in manifest.get('removed', {}).items():
         if saved and 'sha256' in saved and sha(backup / name) != saved['sha256']:
             raise RuntimeError('清理备份校验失败：' + name)
+    wake_files = {}
+    if manifest.get('format') in (6, 7):
+        import wake_install
+        wake_files = wake_install.extra_targets(manifest if manifest.get('format') == 7 else None)
+        if set(manifest.get('wake_files', {})) != set(wake_files):
+            raise RuntimeError('待机修复备份清单不匹配')
+        for name, saved in manifest['wake_files'].items():
+            if saved and 'sha256' in saved and sha(backup / 'wake' / name) != saved['sha256']:
+                raise RuntimeError('待机修复备份校验失败：' + name)
+        run('systemctl','stop','aurora6s-wake.service',check=False)
     was_ro = flash_is_ro()
     run('mount', '-o', 'remount,rw', '/flash')
     try:
+        for name, target in wake_files.items():
+            restore_file(target, manifest['wake_files'][name], backup / 'wake' / name)
         for name, target in saved_targets.items():
             restore_file(target, manifest['files'][name], backup / name)
         for name, target in removed.items():
@@ -239,12 +261,41 @@ def restore(backup):
             run('mount', '-o', 'remount,ro', '/flash')
 
 
-def install(confirmed_6s=False, confirmed_board=None):
+def install(confirmed_6s=False, confirmed_board=None, wake_settings=None):
     profile = check(confirmed_6s=confirmed_6s, confirmed_board=confirmed_board)
     branch = profile['branch']
     board, chip = profile.get('board', '6s'), profile.get('chip', 'rtl8852')
     selected_targets = profile_targets(profile)
+    wake_files = {}
+    wake_config = None
+    import wake_install
+    if wake_settings is None and wake_install.supported(profile):
+        saved_options = Path(wake_install.ROOT + 'settings.json')
+        wake_settings = (json.loads(saved_options.read_text(encoding='utf-8')) if saved_options.exists()
+                         else {'remote_mode': 'auto', 'ethernet_off': False})
+    if wake_settings is not None:
+        import wake_install
+        if not wake_install.supported(profile):
+            raise RuntimeError('待机唤醒仅适用于 6S 或 4 Pro 的 RTL8852 NG/NO 系统')
+        wake_settings = wake_install.validate(wake_settings)
+        wake_install.verify()
+        wake_install.verify_firmware()
+        if branch == 'ng':
+            wake_config = wake_install.boot_config(Path(wake_install.extra_targets(profile)['config.ini']).read_text(encoding='utf-8'))
+        # Test bind mounts disappear on reboot. Never copy into a temporary override.
+        target = '/storage/.config/firmware/rtlbt/rtl8852bs_config'
+        mounted = any(l.split()[1] == target for l in Path('/proc/mounts').read_text().splitlines())
+        if mounted and run('systemctl','is-active','aurora6s-wake.service',check=False).stdout.strip() != 'active':
+            raise RuntimeError('当前仍在运行临时蓝牙实验配置，请先重启，再执行硬件修复')
+        if mounted:
+            run('systemctl','stop','aurora6s-wake.service')
+        wake_files = wake_install.extra_targets(profile)
     removed = cleanup_targets(branch, chip)
+    if chip == 'ap6275p' and (SYSTEMD / 'aurora6s-wake.service').exists():
+        # Stop before reading firmware backups: the RTL service may still have
+        # its temporary 0x1a config bind-mounted. Its shutdown restores the base.
+        # Do not shorten the unit's 95-second graceful shutdown budget.
+        run('systemctl', 'stop', 'aurora6s-wake.service', timeout=105)
     manage_keepalive = chip == 'rtl8852' or bool(removed)
     # Reject non-symlink wants entries before any modification.
     original_links = {}
@@ -254,13 +305,16 @@ def install(confirmed_6s=False, confirmed_board=None):
         original_links[name] = os.readlink(path) if path.is_symlink() else None
     BACKUPS.mkdir(parents=True, exist_ok=True)
     backup = Path(tempfile.mkdtemp(prefix='aurora-addon-', dir=str(BACKUPS)))
-    manifest = dict(format=5, branch=branch, board=board, chip=chip, files={}, removed={}, links=original_links,
+    manifest = dict(format=7 if wake_files else (8 if chip == 'ap6275p' else 5), branch=branch, board=board, chip=chip, files={}, removed={}, links=original_links,
                     keepalive_enabled=run('systemctl', 'is-enabled', 'bt-uart-keepalive.service', check=False).stdout.strip() if manage_keepalive else 'disabled',
                     keepalive_active=run('systemctl', 'is-active', 'bt-uart-keepalive.service', check=False).stdout.strip() if manage_keepalive else 'inactive')
     for name, target in selected_targets.items():
         manifest['files'][name] = snapshot(target, backup / name)
     for name, target in removed.items():
         manifest['removed'][name] = snapshot(target, backup / name)
+    if wake_files:
+        manifest['wake_files'] = {name: snapshot(target, backup / 'wake' / name) for name,target in wake_files.items()}
+        shutil.copy2(Path(__file__).with_name('wake_install.py'), backup / 'wake_install.py')
     (backup / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     shutil.copy2(__file__, backup / 'repair.py')
     shutil.copy2(Path(__file__).with_name('device.py'), backup / 'device.py')
@@ -273,6 +327,21 @@ def install(confirmed_6s=False, confirmed_board=None):
             atomic_copy(PAYLOAD / name, target)
             if sha(target) != sha(PAYLOAD / name):
                 raise RuntimeError('写入校验失败：' + name)
+        if wake_files:
+            for name,target in wake_install.files(profile).items():
+                atomic_copy(wake_install.SOURCE / name,target)
+                if sha(target) != sha(wake_install.SOURCE / name): raise RuntimeError('待机修复写入校验失败：'+name)
+            with tempfile.TemporaryDirectory() as temp:
+                generated = [('settings.json',json.dumps(wake_settings,ensure_ascii=False))]
+                if wake_config is not None: generated.append(('config.ini',wake_config))
+                for name,data in generated:
+                    source=Path(temp)/name; source.write_text(data,encoding='utf-8')
+                    atomic_copy(source,wake_files[name])
+            set_link(wake_files['enable-link'],wake_files['aurora6s-wake.service'])
+            for name in ('old-ethernet-hook','old-native-hook','old-heartbeat-hook'):
+                Path(wake_files[name]).unlink(missing_ok=True)
+            if 'aurora_bt_native.ko' in wake_files:
+                Path(wake_files['aurora_bt_native.ko']).unlink(missing_ok=True)
         for name, path in links(branch).items():
             set_link(path, desired_link(branch, chip, name))
         for target in removed.values():
@@ -304,6 +373,7 @@ def main():
     action.add_argument('--check', action='store_true')
     action.add_argument('--install', action='store_true')
     action.add_argument('--restore', metavar='BACKUP')
+    parser.add_argument('--wake-settings', help='JSON settings for RTL8852 NG/NO wake')
     parser.add_argument('--confirm-6s', action='store_true')
     parser.add_argument('--confirm-board', choices=('6s', '4pro'))
     args = parser.parse_args()
@@ -313,7 +383,7 @@ def main():
             print(json.dumps(check(confirmed_6s=args.confirm_6s, confirmed_board=args.confirm_board,
                                    allow_unidentified=True), ensure_ascii=False))
         elif args.install:
-            print(json.dumps({'backup': install(args.confirm_6s, args.confirm_board)}, ensure_ascii=False))
+            print(json.dumps({'backup': install(args.confirm_6s, args.confirm_board, json.loads(args.wake_settings) if args.wake_settings is not None else None)}, ensure_ascii=False))
         else:
             profile = detect(confirmed_6s=args.confirm_6s, confirmed_board=args.confirm_board, check_kernel=False)
             manifest = json.loads((Path(args.restore) / 'manifest.json').read_text(encoding='utf-8'))

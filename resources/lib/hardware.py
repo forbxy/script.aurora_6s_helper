@@ -77,6 +77,13 @@ class Controller:
             self.close()
             raise
 
+    def resume(self):
+        """Restore chip enable and invalidate registers potentially lost in sleep."""
+        self.last = None
+        self.acquire()
+        write(LEDS / 'sys_led/trigger', 'none')
+        write(LEDS / 'sys_led/brightness', 1)
+
     def apply(self, registers, verify=True):
         self.acquire()
         if registers == self.last:

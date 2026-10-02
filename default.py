@@ -107,16 +107,25 @@ def main():
         result += '无法自动确认机型。如果只是借用了 X4 等设备树，请按盒子实际型号确认；真正的其他型号请取消。\n'
     result += ('将安装 NG DTB 和灯条驱动服务，使用 CE 自带的博通 Wi-Fi/蓝牙支持；备份并清理旧 Realtek NG 修复文件及启动项。' if profile['chip'] == 'ap6275p' and branch == 'NG'
                else '将安装 NO DTB 及 V12 识别规则，使用 CE 自带的博通 Wi-Fi/蓝牙驱动和固件。' if profile['chip'] == 'ap6275p'
-               else '将安装 NG DTB、蓝牙配置及独立 systemd 驱动服务。' if branch == 'NG'
-               else '将安装 NO DTB、蓝牙配置及 V12 识别规则。')
+               else '将安装 NG DTB、蓝牙配置及驱动服务。还会配置蓝牙待机唤醒、恢复及 PCIe 待机修复，更新 config.ini 启动参数；唤醒名单自动更新，下一步选择有线选项。' if branch == 'NG'
+               else '将安装 NO DTB、蓝牙配置及 V12 识别规则，并配置蓝牙待机唤醒和恢复；唤醒名单自动更新，下一步选择有线选项。')
     if not dialog.yesno('极光硬件修复', result + '\n\n安装前会备份，完成后需要重启。确认机型并安装？',
                         nolabel='取消', yeslabel='备份并安装'):
         return
+    wake_settings = None
+    import wake_install
+    if wake_install.supported(profile):
+        wake_settings = wake_install.choose(dialog)
+        if wake_settings is None:
+            return
     progress = xbmcgui.DialogProgressBG()
     progress.create('极光硬件修复', '正在备份并部署…')
     try:
         script = Path(__file__).parent / 'resources/scripts/install-repair.sh'
-        proc = subprocess.run(['/bin/sh', str(script), '--install', '--confirm-board', profile['board']],
+        arguments = ['/bin/sh', str(script), '--install', '--confirm-board', profile['board']]
+        if wake_settings is not None:
+            arguments += ['--wake-settings', json.dumps(wake_settings, ensure_ascii=False)]
+        proc = subprocess.run(arguments,
                               capture_output=True, encoding='utf-8', timeout=180,
                               env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
         if proc.returncode:
