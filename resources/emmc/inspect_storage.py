@@ -9,6 +9,7 @@ import tempfile
 
 from aurora_emmc import probe, plan, read
 from file_attributes import ignored_attribute_names,rsync_xattr_filters
+from storage_mounts import storage_source
 
 EXCLUDE = ('aurora-emmc-backups', 'aurora-emmc-staging', 'aurora-emmc-jobs', 'lost+found')
 
@@ -70,21 +71,18 @@ def rsync_flags(version, inventory, metadata_fallback=False):
 def run():
     report = probe()
     plan(report, 20, 1024, 'reset-data', 16)
-    for line in read('/proc/self/mountinfo').splitlines():
-        mountpoint = line.split(' - ', 1)[0].split()[4]
-        if mountpoint.startswith('/storage/'):
-            raise ValueError('Nested storage mounts require explicit review: ' + mountpoint)
-    inventory = scan_tree('/storage')
-    version = subprocess.run(['rsync', '--version'], check=True, capture_output=True, text=True).stdout
-    flags = rsync_flags(version, inventory)
-    with tempfile.TemporaryDirectory(prefix='aurora-storage-dryrun-', dir='/tmp') as dest:
-        args = ['rsync', flags, '--numeric-ids', '--stats'] + rsync_xattr_filters(flags)
-        args += ['--exclude=/' + x + '/' for x in EXCLUDE]
-        args += ['/storage/', dest + '/']
-        p = subprocess.run(args, capture_output=True, text=True, timeout=180,
-                           env={**os.environ, 'LC_ALL': 'C'})
-        if p.returncode:
-            raise ValueError('rsync dry-run failed: ' + p.stderr)
+    with storage_source() as source:
+        inventory = scan_tree(source)
+        version = subprocess.run(['rsync', '--version'], check=True, capture_output=True, text=True).stdout
+        flags = rsync_flags(version, inventory)
+        with tempfile.TemporaryDirectory(prefix='aurora-storage-dryrun-', dir='/tmp') as dest:
+            args = ['rsync', flags, '--numeric-ids', '--stats'] + rsync_xattr_filters(flags)
+            args += ['--exclude=/' + x + '/' for x in EXCLUDE]
+            args += [str(source)+'/', dest + '/']
+            p = subprocess.run(args, capture_output=True, text=True, timeout=180,
+                               env={**os.environ, 'LC_ALL': 'C'})
+            if p.returncode:
+                raise ValueError('rsync dry-run failed: ' + p.stderr)
     return dict(schema=1, dry_run=True, consistent_snapshot=False, copied_files=0,
                 installation_ready=False, inventory=inventory, excludes=EXCLUDE,
                 rsync_version=version, command=args, stats=p.stdout,

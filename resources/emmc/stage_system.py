@@ -13,6 +13,7 @@ import time
 from aurora_emmc import probe,plan,read
 from layout_trial import atomic_json,private_external
 from inspect_storage import scan_tree,rsync_flags
+from storage_mounts import storage_source
 from live_snapshot import copy_live_storage,rsync_copy
 from file_attributes import attributes,copy_attributes,ignored_attribute_names,rsync_xattr_filters
 from prepare_boot import sha,modify_cfgload,configure_rootopt,validate_stock_cfgload,STOCK_CFGLOAD
@@ -88,23 +89,22 @@ def snapshot(folder,boot_stage, live=False, update=None):
     report=probe();plan(report,20,1024,'reset-data',16)
     boot=validate_boot(boot_stage)
     if any(Path('/storage/.update').iterdir()):raise ValueError('Pending CE update must be handled first')
-    if any(m.split(' - ',1)[0].split()[4].startswith('/storage/') for m in read('/proc/self/mountinfo').splitlines()):
-        raise ValueError('Nested storage mount requires review')
     folder=private_external(folder,create=True);dest=folder/'storage';dest.mkdir(mode=0o700)
     active=[] if live else [s for s in SERVICES if subprocess.run(['systemctl','is-active','--quiet',s]).returncode==0]
     atomic_json(folder/'services.json',{'originally_active':active})
     # ExecStopPost of the supervising oneshot also calls restore_services on errors/timeouts.
     try:
         for service in active:run(['systemctl','stop',service],timeout=60)
-        inventory=scan_tree('/storage');version=run(['rsync','--version']);flags=rsync_flags(version,inventory,metadata_fallback=True).replace('n','')
-        if live:
-            copy_live_storage('/storage',dest,flags,EXCLUDES,run,update)
-        else:
-            args=['rsync',flags,'--numeric-ids']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/']
-            run(args,timeout=7200);os.sync()
-            changes=run(['rsync',flags+'nc','--numeric-ids','--itemize-changes']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+['/storage/',str(dest)+'/'],timeout=7200)
-            if changes.strip():raise ValueError('Source changed during quiesced snapshot: '+changes[:2000])
-        copy_attributes('/storage',dest,update)
+        with storage_source() as source:
+            inventory=scan_tree(source);version=run(['rsync','--version']);flags=rsync_flags(version,inventory,metadata_fallback=True).replace('n','')
+            if live:
+                copy_live_storage(source,dest,flags,EXCLUDES,run,update)
+            else:
+                args=['rsync',flags,'--numeric-ids']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+[str(source)+'/',str(dest)+'/']
+                run(args,timeout=7200);os.sync()
+                changes=run(['rsync',flags+'nc','--numeric-ids','--itemize-changes']+rsync_xattr_filters(flags)+['--exclude='+p for p in EXCLUDES]+[str(source)+'/',str(dest)+'/'],timeout=7200)
+                if changes.strip():raise ValueError('Source changed during quiesced snapshot: '+changes[:2000])
+            copy_attributes(source,dest,update)
         data=snapshot_inventory(dest,update,'snapshot-verify',include_xattrs=True)
         atomic_json(folder/'manifest.json',dict(schema=1,kind='live-ce-snapshot' if live else 'quiesced-ce-snapshot',boot_stage=str(Path(boot_stage).resolve()),
             boot_manifest_sha256=sha(Path(boot_stage)/'manifest.json'),boot_files=boot['boot_files'],storage=data,

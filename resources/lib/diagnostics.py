@@ -40,6 +40,7 @@ def user_message(error):
         if match:
             kind, raw = match.groups()
     translations = {
+        'Nested storage mount requires review: ': '发现 /storage 下的额外挂载：{value}\n请先停止相关挂载服务并卸载该路径，再重试。不要删除文件或目录内容；助手不会自动卸载它。',
         'Nested filesystem encountered: ': '发现 /storage 下的额外挂载：{value}\n请先停止相关挂载服务并卸载该目录，再重试。不要删除目录内容；助手不会自动卸载它。',
         'Nested storage mounts require explicit review: ': '发现 /storage 下的额外挂载：{value}\n请先停止相关挂载服务并卸载该目录，再重试。不要删除目录内容。',
         'Read-only filesystem check failed: ': '残留文件系统未通过只读检查：{value}\n已停止自动修复，请保留日志进一步检查。',

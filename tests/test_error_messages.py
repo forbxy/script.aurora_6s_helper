@@ -11,6 +11,15 @@ sys.path.insert(0,str(LIB))
 from diagnostics import user_message
 
 class ErrorMessageTests(unittest.TestCase):
+    def test_snapshot_mount_error_keeps_path_in_dialog(self):
+        path='/storage/videos/网盘 115open'
+        for raw in ('Nested storage mount requires review: '+path,
+                    'Traceback (most recent call last):\nValueError: Nested storage mount requires review: '+path):
+            message=user_message(RuntimeError(raw))
+            self.assertIn(path,message)
+            self.assertIn('额外挂载',message)
+            self.assertNotIn('Traceback',message)
+
     def test_reported_mount_traceback(self):
         raw='Traceback (most recent call last):\n  File "inspect_storage.py", line 29, in inspect\n    raise ValueError("Nested filesystem encountered: " + str(path))\nValueError: Nested filesystem encountered: /storage/videos/115open'
         message=user_message(RuntimeError(raw))

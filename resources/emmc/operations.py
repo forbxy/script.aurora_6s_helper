@@ -117,7 +117,9 @@ def assess(action=None, backup=None, android_gib=None):
         if action == 'install':
             # Snapshot + reserve; exclude backups and jobs through scan policy.
             from inspect_storage import scan_tree,rsync_flags
-            inventory=scan_tree('/storage')
+            from storage_mounts import storage_source
+            with storage_source() as source:
+                inventory=scan_tree(source)
             rsync_flags(run(['rsync','--version']),inventory,metadata_fallback=True)
             usage = storage_bytes()
             choices = policy.capacity_choices(report, usage)

@@ -212,3 +212,16 @@ unknown slots, and install/remove environment write/readback preservation.
 ### 1.8.4：保留内核文件名大小写
 
 安装时忽略 `kernel.img` 的大小写识别必需内核文件；复制、清单和读回验证保留源文件实际名称（例如 `KERNEL.img`），不把 `KERNELce.img` 当成标准内核。源目录及清单中的大小写冲突仍拒绝。缺少启动文件时明确列出缺少的名称。`config.ini`、`cfgload` 的特殊处理及其他复制规则不变。
+
+### 2026-10-04：兼容蓝牙唤醒配置的运行时挂载
+
+安装预检、storage 暂存和复制预演共用嵌套挂载检查。仅允许已验证的
+`/storage/.config/aurora6s-wake/rtl8852bs_config.wake` 到
+`/storage/.config/firmware/rtlbt/rtl8852bs_config` 的同文件系统普通文件绑定：
+检查挂载来源、文件身份和心跳配置哈希，不按文件名直接放行。
+
+有此挂载时，通过 `/run` 下非递归、私有、只读的 storage 绑定视图复制底层文件，
+并验证基础配置哈希。保留基础配置（0x18），同时迁移唤醒服务和独立心跳配置（0x1a），
+由新系统启动时重新建立覆盖。不会卸载当前蓝牙配置、停止心跳或重置控制器。
+视图在正常完成或异常退出时卸载；卸载失败会报错并停止流程。
+其他嵌套挂载仍拒绝，后端日志和中文提示均显示解码后的具体路径。
