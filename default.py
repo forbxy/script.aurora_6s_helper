@@ -109,6 +109,8 @@ def main():
                else '将安装 NO DTB 及 V12 识别规则，使用 CE 自带的博通 Wi-Fi/蓝牙驱动和固件。' if profile['chip'] == 'ap6275p'
                else '将安装 NG DTB、蓝牙配置及驱动服务。还会配置蓝牙待机唤醒、恢复及 PCIe 待机修复，更新 config.ini 启动参数；唤醒名单自动更新，下一步选择有线选项。' if branch == 'NG'
                else '将安装 NO DTB、蓝牙配置及 V12 识别规则，并配置蓝牙待机唤醒和恢复；唤醒名单自动更新，下一步选择有线选项。')
+    if branch == 'NO':
+        result += '\n同时消除自定义设备树引起的 30 秒开机等待。'
     if not dialog.yesno('极光硬件修复', result + '\n\n安装前会备份，完成后需要重启。确认机型并安装？',
                         nolabel='取消', yeslabel='备份并安装'):
         return

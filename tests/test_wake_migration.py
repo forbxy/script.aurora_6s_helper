@@ -75,7 +75,7 @@ class WakeMigrationTests(unittest.TestCase):
                     repair.install()
             else:
                 backup = Path(repair.install())
-                self.assertEqual(json.loads((backup/'manifest.json').read_text())['format'], 8)
+                self.assertEqual(json.loads((backup/'manifest.json').read_text())['format'], 9 if branch == 'no' else 8)
                 self.assertEqual(dtb.read_bytes(), b'new-ap-dtb')
                 for filename in removed.values():
                     self.assertFalse(Path(filename).exists())

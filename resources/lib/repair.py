@@ -16,6 +16,7 @@ BACKUPS = Path('/storage/ce-fix-backup')
 LOCK = Path('/run/aurora6s-repair.lock')
 SYSTEMD = Path('/storage/.config/system.d')
 NO = {'no/6s/dtb.img': '/flash/dtb.img',
+      'no/6s/post-sysroot.sh': '/flash/post-sysroot.sh',
       'no/6s/rtl8852bs_config': '/storage/.config/firmware/rtlbt/rtl8852bs_config',
       'no/6s/99-zidoo-v12-keyboard.rules': '/storage/.config/udev.rules.d/99-zidoo-v12-keyboard.rules'}
 NG = {'ng/6s/dtb.img': '/flash/dtb.img',
@@ -25,12 +26,14 @@ for _name in ('8852be.ko', 'rtkm.ko', 'leds-tca6507.ko', 'load-drivers.sh'):
 for _name in ('aurora6s-ng-wifi.service', 'aurora6s-ng-led.service'):
     NG['ng/6s/' + _name] = str(SYSTEMD / _name)
 UNITS = ('aurora6s-ng-wifi.service', 'aurora6s-ng-led.service', 'rtkbt-firmware-aml.service')
+BOOT_HOOK_BEGIN = b'# BEGIN Aurora NO DTB check'
+BOOT_HOOK_END = b'# END Aurora NO DTB check'
 
 
 def targets(branch, board='6s', chip='rtl8852'):
     prefix = payload_key(branch, board, chip)
     if chip == 'ap6275p':
-        allowed = ('dtb.img', 'leds-tca6507.ko', 'load-drivers.sh', 'aurora6s-ng-led.service') if branch == 'ng' else ('dtb.img', '99-zidoo-v12-keyboard.rules')
+        allowed = ('dtb.img', 'leds-tca6507.ko', 'load-drivers.sh', 'aurora6s-ng-led.service') if branch == 'ng' else ('dtb.img', 'post-sysroot.sh', '99-zidoo-v12-keyboard.rules')
         base = NG if branch == 'ng' else NO
         return {prefix + '/' + Path(name).name: target for name, target in base.items()
                 if Path(name).name in allowed}
@@ -70,15 +73,16 @@ def backup_targets(manifest):
     """Keep pre-layout backups restorable without trusting arbitrary paths."""
     branch = manifest['branch']
     version = manifest.get('format', 1)
-    if version in (4, 5, 6, 7, 8):
+    if version == 9:
         return targets(branch, manifest['board'], manifest['chip'])
-    if version == 3:
+    if version in (3, 4, 5, 6, 7, 8):
         saved = targets(branch, manifest['board'], manifest['chip'])
+        saved = {name: target for name, target in saved.items() if not name.endswith('/post-sysroot.sh')}
         # 1.3.0 Broadcom backups predate the shared NO input fix.
-        if manifest['chip'] == 'ap6275p':
+        if version == 3 and manifest['chip'] == 'ap6275p':
             saved = {name: target for name, target in saved.items() if name.endswith('/dtb.img')}
         return saved
-    current = targets(branch)
+    current = {name: target for name, target in targets(branch).items() if not name.endswith('/post-sysroot.sh')}
     if version == 2:
         return current
     if version != 1:
@@ -121,6 +125,21 @@ def atomic_copy(source, target):
     finally:
         if os.path.exists(name):
             os.unlink(name)
+
+
+def boot_hook_content(target, source):
+    """Update only our marked block, retaining other initramfs customizations."""
+    current = Path(target).read_bytes() if Path(target).exists() else b''
+    block = Path(source).read_bytes().split(b'\n', 1)[1]  # Exclude the payload's shebang.
+    lines = current.splitlines(keepends=True)
+    begin = [i for i, line in enumerate(lines) if line.rstrip(b'\r\n') == BOOT_HOOK_BEGIN]
+    end = [i for i, line in enumerate(lines) if line.rstrip(b'\r\n') == BOOT_HOOK_END]
+    if not begin and not end:
+        prefix = current or b'#!/bin/sh\n'
+        return prefix + (b'' if prefix.endswith(b'\n') else b'\n') + block
+    if len(begin) != 1 or len(end) != 1 or begin[0] >= end[0]:
+        raise RuntimeError('启动脚本中的 DTB 检查标记不完整：' + str(target))
+    return b''.join(lines[:begin[0]]) + block + b''.join(lines[end[0] + 1:])
 
 
 def set_link(path, value):
@@ -178,8 +197,11 @@ def check(confirmed_6s=False, allow_unidentified=False, confirmed_board=None):
         # Experimental boot overrides must be removed deliberately, not silently carried over.
         if any(s in config for s in ('amlogic_pcie_init', 'wifi_dummy_init', 'systemd.mask=aurora6s-ng-wifi')):
             raise RuntimeError('config.ini 仍有 PCIe/Wi-Fi 诊断启动参数，请先恢复正常启动配置')
-    profile['files'] = {name: Path(target).is_file() and sha(target) == sha(PAYLOAD / name)
-                        for name, target in profile_targets(profile).items()}
+    profile['files'] = {
+        name: Path(target).is_file() and (
+            Path(target).read_bytes() == boot_hook_content(target, PAYLOAD / name)
+            if name.endswith('/post-sysroot.sh') else sha(target) == sha(PAYLOAD / name))
+        for name, target in profile_targets(profile).items()}
     profile['cleanup'] = [target for target in cleanup_targets(profile['branch'], profile['chip']).values()
                           if os.path.lexists(target)]
     return profile
@@ -213,7 +235,7 @@ def restore(backup):
     manifest = json.loads((backup / 'manifest.json').read_text(encoding='utf-8'))
     branch = manifest['branch']
     saved_targets = backup_targets(manifest)
-    removed = cleanup_targets(branch, manifest['chip'], manifest['format']) if manifest.get('format') in (5, 6, 7, 8) else {}
+    removed = cleanup_targets(branch, manifest['chip'], manifest['format']) if manifest.get('format') in (5, 6, 7, 8, 9) else {}
     if set(manifest.get('removed', {})) != set(removed):
         raise RuntimeError('清理备份清单不匹配')
     if set(manifest['files']) != set(saved_targets) or set(manifest['links']) != set(links(branch)):
@@ -225,9 +247,9 @@ def restore(backup):
         if saved and 'sha256' in saved and sha(backup / name) != saved['sha256']:
             raise RuntimeError('清理备份校验失败：' + name)
     wake_files = {}
-    if manifest.get('format') in (6, 7):
+    if manifest.get('format') in (6, 7) or (manifest.get('format') == 9 and 'wake_files' in manifest):
         import wake_install
-        wake_files = wake_install.extra_targets(manifest if manifest.get('format') == 7 else None)
+        wake_files = wake_install.extra_targets(None if manifest.get('format') == 6 else manifest)
         if set(manifest.get('wake_files', {})) != set(wake_files):
             raise RuntimeError('待机修复备份清单不匹配')
         for name, saved in manifest['wake_files'].items():
@@ -266,6 +288,8 @@ def install(confirmed_6s=False, confirmed_board=None, wake_settings=None):
     branch = profile['branch']
     board, chip = profile.get('board', '6s'), profile.get('chip', 'rtl8852')
     selected_targets = profile_targets(profile)
+    prepared_hooks = {name: boot_hook_content(target, PAYLOAD / name)
+                      for name, target in selected_targets.items() if name.endswith('/post-sysroot.sh')}
     wake_files = {}
     wake_config = None
     import wake_install
@@ -305,7 +329,7 @@ def install(confirmed_6s=False, confirmed_board=None, wake_settings=None):
         original_links[name] = os.readlink(path) if path.is_symlink() else None
     BACKUPS.mkdir(parents=True, exist_ok=True)
     backup = Path(tempfile.mkdtemp(prefix='aurora-addon-', dir=str(BACKUPS)))
-    manifest = dict(format=7 if wake_files else (8 if chip == 'ap6275p' else 5), branch=branch, board=board, chip=chip, files={}, removed={}, links=original_links,
+    manifest = dict(format=9 if branch == 'no' else (7 if wake_files else (8 if chip == 'ap6275p' else 5)), branch=branch, board=board, chip=chip, files={}, removed={}, links=original_links,
                     keepalive_enabled=run('systemctl', 'is-enabled', 'bt-uart-keepalive.service', check=False).stdout.strip() if manage_keepalive else 'disabled',
                     keepalive_active=run('systemctl', 'is-active', 'bt-uart-keepalive.service', check=False).stdout.strip() if manage_keepalive else 'inactive')
     for name, target in selected_targets.items():
@@ -319,13 +343,20 @@ def install(confirmed_6s=False, confirmed_board=None, wake_settings=None):
     shutil.copy2(__file__, backup / 'repair.py')
     shutil.copy2(Path(__file__).with_name('device.py'), backup / 'device.py')
     (backup / 'restore.sh').write_text('#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\nexec /usr/bin/python3 repair.py --restore "$PWD"\n')
+    prepared_sources = {}
+    for name, content in prepared_hooks.items():
+        source = backup / 'prepared' / name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(content)
+        prepared_sources[name] = source
     os.sync()
     was_ro = flash_is_ro()
     run('mount', '-o', 'remount,rw', '/flash')
     try:
         for name, target in selected_targets.items():
-            atomic_copy(PAYLOAD / name, target)
-            if sha(target) != sha(PAYLOAD / name):
+            source = prepared_sources.get(name, PAYLOAD / name)
+            atomic_copy(source, target)
+            if sha(target) != sha(source):
                 raise RuntimeError('写入校验失败：' + name)
         if wake_files:
             for name,target in wake_install.files(profile).items():

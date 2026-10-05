@@ -21,10 +21,13 @@
   "ng/6s/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2",
   "no/4pro/ap6275p/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
   "no/4pro/ap6275p/dtb.img": "15d7235982295e40ad6ee64fbbcfb6ddcd211d687326992a348a83dc9ecb486c",
+  "no/4pro/ap6275p/post-sysroot.sh": "b930efbd9d609f0b70797b87ffa7b01c81aba8f3280cc93e3f9f2d67da6fc6a3",
   "no/4pro/rtl8852/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
   "no/4pro/rtl8852/dtb.img": "8c15ac006896dbec9530071ce2329081fda5d04e97fcf314c4dec08871748d5a",
+  "no/4pro/rtl8852/post-sysroot.sh": "b930efbd9d609f0b70797b87ffa7b01c81aba8f3280cc93e3f9f2d67da6fc6a3",
   "no/4pro/rtl8852/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2",
   "no/6s/99-zidoo-v12-keyboard.rules": "9bf32cb7d7b44d46c0731ae63c0ecd20db8fcf65726fcda31b4002e09072ea42",
   "no/6s/dtb.img": "9e4b07aa3006f76a5f040c44742e8431a9f6a4d536561d3c2d58c02023fcf553",
+  "no/6s/post-sysroot.sh": "b930efbd9d609f0b70797b87ffa7b01c81aba8f3280cc93e3f9f2d67da6fc6a3",
   "no/6s/rtl8852bs_config": "f60918c29e31671593ce38bb3870ffe83be9c2c82d232dd3c3f5d75cd89cecf2"
 }
